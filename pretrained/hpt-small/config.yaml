@@ -1,0 +1,168 @@
+seed: 0
+output_dir: output/04_04_2024_00_18_28_1061204
+domains: austin_sailor_dataset_converted_externally_to_rlds, stanford_hydra_dataset_converted_externally_to_rlds,
+  austin_buds_dataset_converted_externally_to_rlds, austin_sirius_dataset_converted_externally_to_rlds,
+  berkeley_mvp_converted_externally_to_rlds, berkeley_rpt_converted_externally_to_rlds,
+  iamlab_cmu_pickup_insert_converted_externally_to_rlds, utaustin_mutex, imperialcollege_sawyer_wrist_cam,
+  stanford_mask_vit_converted_externally_to_rlds, language_table, kuka, bc_z, robo_net,
+  dlr_sara_pour_converted_externally_to_rlds, stanford_robocook_converted_externally_to_rlds,
+  cmu_play_fusion, bridge, furniture_bench_dataset_converted_externally_to_rlds, ucsd_pick_and_place_dataset_converted_externally_to_rlds,
+  usc_cloth_sim_converted_externally_to_rlds, stanford_kuka_multimodal_dataset_converted_externally_to_rlds,
+  roboturk, kaist_nonprehensile_converted_externally_to_rlds, asu_table_top_converted_externally_to_rlds,
+  utokyo_xarm_pick_and_place_converted_externally_to_rlds, berkeley_cable_routing,
+  droid
+log_dir: output/04_04_2024_00_18_28_1061204
+debug_distributed: false
+wb_tag: default
+wb_cont_run: 37fe2kep
+log_interval: 10
+script_name: run_resnet_30dataset_traj1000_embed_128_batch1024_800k_cons
+save_wb_checkpoint: true
+slurm_job_id: '25682608'
+effective_total_epochs: 100
+effective_batch_size: 256
+epoch_size: 10
+total_num_traj: 0
+total_num_sample: 0
+rank: 0
+gpu: 0
+task_per_gpu: 1
+world_size: 32
+debug_submitit: false
+ngpus: 8
+nodes: 4
+timeout: 4320
+job_dir: logs/
+partition: learnlab
+use_volta32: true
+comment: ''
+resume: logs/
+dist_url: file:///checkpoint/xinleic/experiments/b96f1c1c8a1e49f691901ccebe7e3f1f_init
+dist_on_itp: false
+local_rank: 1
+distributed: true
+dist_backend: nccl
+dset_w_temperature: 2.0
+dataset_shuffle: true
+dataset_groups: ''
+nodelist: learnlab,learnfair,scavenge
+fsdp: false
+dataset:
+  _target_: hpt_pretrain.dataset.traj_dataset.TrajDataset
+  horizon: 5
+  val_ratio: 0.1
+  pad_after: 0
+  precompute_feat: true
+  image_encoder: resnet
+  episode_cnt: 1000
+  step_cnt: 10000000
+  data_augmentation: false
+  use_disk: true
+  pad_before: 0
+  data_ratio: 1
+  action_horizon: 8
+  observation_horizon: 4
+  dataset_postfix: _traj1000
+  dataset_encoder_postfix: _resnet
+  use_multiview: false
+  normalize_state: true
+  use_heldout_dataset: true
+  heldout_dataset: false
+  regenerate: false
+  continue_generate: false
+network:
+  _target_: hpt_pretrain.models.policy.Policy
+  embed_dim: 128
+  num_blocks: 16
+  num_heads: 8
+  use_modality_embedding: true
+  use_domain_embedding: false
+  token_postprocessing: mean
+  weight_init_style: pytorch
+  drop_path: 0.1
+  mae_loss_scale: 0.0
+  masked_autoencoding: false
+stem:
+  modalities:
+  - image
+  - state
+  modality_embed_dim: 128
+  normalize_state: ${dataset.normalize_state}
+  state_embedding_dim: 1
+  image_encoder: ${dataset.image_encoder}
+  crossattn_dim_head: 64
+  crossattn_heads: 8
+  crossattn_modality_dropout: 0.1
+  observation_horizon: ${dataset.observation_horizon}
+  random_horizon_masking: true
+  add_pos_embedding_to_state: false
+  num_blocks: 1
+  crossattn_latent:
+    image: 16
+    state: 16
+  image:
+    _target_: hpt_pretrain.models.policy_stem.MLP
+    input_dim: 512
+    output_dim: 128
+    widths:
+    - 128
+    num_of_copy: 1
+  state:
+    _target_: hpt_pretrain.models.policy_stem.MLP
+    input_dim: 7
+    output_dim: 128
+    widths:
+    - 128
+head:
+  _target_: hpt_pretrain.models.policy_head.MLP
+  input_dim: 128
+  tanh_end: true
+  output_dim: 56
+  dropout: true
+  widths:
+  - 256
+  - 128
+dataloader:
+  batch_size: 32
+  num_workers: 1
+  pin_memory: false
+  persistent_workers: false
+  drop_last: true
+val_dataloader:
+  num_workers: 1
+  pin_memory: false
+  persistent_workers: false
+ddp_dataloader:
+  num_workers: 8
+  pin_memory: false
+  persistent_workers: false
+  drop_last: false
+  prefetch_factor: 2
+ddp_val_dataloader:
+  num_workers: 8
+  pin_memory: false
+  persistent_workers: false
+  drop_last: false
+  prefetch_factor: 2
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0008
+  eps: 1.0e-06
+  weight_decay: 0.05
+optimizer_misc:
+  nontrunk_lr_scale: 0.5
+warmup_lr:
+  lr: 1.0e-10
+  step: 1000
+train:
+  total_epochs: 3000
+  total_iters: 800000
+  epoch_iters: 1000
+  validation_iters: 100
+  use_accumulation: false
+  pretrained_dir: ''
+  max_validation_size: 10
+  accumulate_batch_step: 1
+lr_scheduler:
+  _target_: torch.optim.lr_scheduler.ConstantLR
+  factor: 1

@@ -1,0 +1,29 @@
+# Python Byte-compiled / Cache files
+__pycache__/
+*.py[cod]
+
+# Distribution / Packaging
+build/
+dist/
+*.egg-info/
+
+# Data directories (usually very large, better to regenerate or download separately)
+data/
+
+# Zarr datasets (usually very large, better to regenerate or download separately)
+*.zarr/
+
+# ML Experiment logs and outputs (can be large, often re-generated)
+wandb/
+
+# ML Model checkpoints and outputs (usually large, can be re-generated)
+outputs/
+checkpoints/
+saved_models/
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store    # Mac
+Thumbs.db     # Windows

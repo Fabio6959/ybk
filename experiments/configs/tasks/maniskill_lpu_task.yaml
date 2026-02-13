@@ -1,0 +1,26 @@
+# @package _global_
+dataset_generator_func:
+  _target_: env.maniskill.rollout_runner.generate_dataset_rollouts
+  env_names: ["LiftPegUpright-v1"] #  ["LiftPegUpright-v1"]
+  max_total_transition: 500000
+  episode_num_pertask:  ${dataset.episode_cnt}
+  save_video: False
+  use_image: True
+
+# test
+rollout_runner:
+  _target_: env.maniskill.rollout_runner.RolloutRunner
+  episode_num: 30
+  env_names: ["LiftPegUpright-v1"]  # ["LiftPegUpright-v1"]
+  save_video: False
+
+# training config
+train:
+  total_epochs: 200  # maximum training epochs before termination. usually set as maximum
+  total_iters: 10000 # maximum training steps before termination
+  epoch_iters: 1000  # training steps in each epoch
+  validation_iters: 100 # maximum iterations for validation
+  pretrained_dir: "" # pretrained model path for testing
+  freeze_trunk: False # whether to freeze the trunk during finetuning
+domains: maniskill_1task
+env_names: ${rollout_runner.env_names}
