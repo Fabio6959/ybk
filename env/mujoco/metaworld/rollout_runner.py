@@ -123,10 +123,11 @@ def learner_trajectory_generator(env, policy, lang="", camera_name="view_1"):
 class RolloutRunner:
     """evaluate policy rollouts"""
 
-    def __init__(self, env_names, episode_num, save_video=False):
+    def __init__(self, env_names, episode_num, save_video=False, gui=False):
         self.env_names = env_names
         self.episode_num = episode_num
         self.save_video = save_video
+        self.gui = gui
 
     @torch.no_grad()
     def run(
@@ -196,10 +197,12 @@ class RolloutRunner:
                     for o, r, done, info, img in learner_trajectory_generator(env, policy, language_instruction):
                         traj_length += 1
                         eps_reward += r
+                        
+                        if gui or self.gui:
+                            cv2.imshow("img", img)
+                            cv2.waitKey(1)
+                        
                         if self.save_video and i <= 5:
-                            if gui:
-                                cv2.imshow("img", img)
-                                cv2.waitKey(1)
                             writer.write(img)
 
                         if info["success"]:
@@ -296,10 +299,12 @@ def generate_dataset_rollouts(
                     eps_images.append(img)
                     traj_length += 1
                     eps_reward += info["success"]
+                    
+                    if gui:
+                        cv2.imshow("img", img)
+                        cv2.waitKey(1)
+                    
                     if save_video and i <= 10:
-                        if gui:
-                            cv2.imshow("img", img)
-                            cv2.waitKey(1)
                         writer.write(img)
 
                     if info["success"]:

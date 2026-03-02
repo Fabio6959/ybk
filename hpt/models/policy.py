@@ -31,6 +31,9 @@ from ..utils.utils import (
     get_t5_embeddings,
 )
 
+from .prototype_calibration import PrototypeDynamicCalibrator
+from .prototype_transfer import PrototypeCrossDomainTransfer
+
 STD_SCALE = 0.02
 
 class Policy(nn.Module):
@@ -111,6 +114,16 @@ class Policy(nn.Module):
         self.current_w_a = None
         self.current_w_e = None
         self._register_mask_update_hook()
+
+        # DyCoP: Prototype Dynamic Calibrator (PDC)
+        self.pdc_calibrator = PrototypeDynamicCalibrator(
+            prototype_dim=self.prototype_dim,
+            hidden_dim=self.embed_dim // 2,
+            threshold=0.3
+        )
+
+        # DyCoP: Prototype Cross-domain Transfer (PCT)
+        self.pct_transfer = None  # Will be initialized with source prototypes
 
 
     def _register_mask_update_hook(self):
@@ -281,6 +294,15 @@ class Policy(nn.Module):
             self.env_prototypes = self._init_prototypes(f_e, self.prototype_num)
             # print('gogogogogogogogoggogo~~~~~2```~`~~`~', self.agent_prototypes.shape, self.env_prototypes.shape)
 
+        # DyCoP: Apply Prototype Dynamic Calibration (PDC)
+        if self.pdc_calibrator is not None and self.training:
+            self.agent_prototypes, drift_a, is_drifted_a = self.pdc_calibrator(
+                f_a, self.agent_prototypes
+            )
+            self.env_prototypes, drift_e, is_drifted_e = self.pdc_calibrator(
+                f_e, self.env_prototypes
+            )
+
         f_a_flat = f_a.view(B, -1)  # [B, T*D]
         f_e_flat = f_e.view(B, -1)
         proto_a_flat = self.agent_prototypes.view(P, -1)  # [P, T*D]
@@ -295,7 +317,7 @@ class Policy(nn.Module):
         trunk_tokens_rec = self.decoder(torch.cat([p_a, p_e], dim=-1))  # [B, T, D]
         # print('gogogogogogogogoggogo~~~~~4```~`~~`~', trunk_tokens_rec.shape)
         self.agent_prototypes = self._update_prototypes(self.agent_prototypes, f_a.detach(), w_a.detach())
-        self.env_prototypes = self._update_prototypes(self.env_prototypes, f_a.detach(), w_a.detach())
+        self.env_prototypes = self._update_prototypes(self.env_prototypes, f_e.detach(), w_e.detach())
         # print('gogogogogogogogoggogo~~~~~5```~`~~`~', self.agent_prototypes.shape, self.env_prototypes.shape)
         # print('gogogogogogogogoggogo~~~~~final```~`~~`~', trunk_tokens_rec.shape, tokens.shape)
         return trunk_tokens_rec
@@ -586,6 +608,97 @@ class Policy(nn.Module):
                 path = path.replace("output/", "")
             path = download_from_huggingface(path[len("hf://") :])
             self.trunk.load_state_dict(torch.load(path), strict=True)
+
+    def init_pct_transfer(self):
+        """Initialize PCT transfer module with current prototypes as source."""
+        self.pct_transfer = PrototypeCrossDomainTransfer(
+            prototype_dim=self.prototype_dim,
+            hidden_dim=self.embed_dim,
+            source_prototypes={
+                'agent': self.agent_prototypes,
+                'env': self.env_prototypes
+            }
+        )
+
+    def adapt_to_new_domain(
+        self, 
+        new_domain_name: str, 
+        few_shot_data: Optional[dict] = None,
+        top_k: int = 3,
+        num_finetune_steps: int = 10
+    ):
+        """
+        DyCoP: Adapt to new agent/environment domain using PCT.
+        
+        Args:
+            new_domain_name: name of the new domain
+            few_shot_data: dict with 'agent' and 'env' few-shot data tensors
+            top_k: number of similar prototypes to retrieve
+            num_finetune_steps: number of fine-tuning steps
+        """
+        if self.pct_transfer is None:
+            self.init_pct_transfer()
+        
+        with torch.no_grad():
+            if few_shot_data is not None:
+                agent_data = few_shot_data.get('agent')
+                env_data = few_shot_data.get('env')
+                
+                if agent_data is not None:
+                    if agent_data.dim() == 3:
+                        agent_feat = agent_data.mean(dim=[0, 1])
+                    elif agent_data.dim() == 2:
+                        agent_feat = agent_data.mean(dim=0)
+                    else:
+                        agent_feat = agent_data
+                else:
+                    agent_feat = torch.randn(self.prototype_dim, device=self.agent_prototypes.device)
+                
+                if env_data is not None:
+                    if env_data.dim() == 3:
+                        env_feat = env_data.mean(dim=[0, 1])
+                    elif env_data.dim() == 2:
+                        env_feat = env_data.mean(dim=0)
+                    else:
+                        env_feat = env_data
+                else:
+                    env_feat = torch.randn(self.prototype_dim, device=self.env_prototypes.device)
+            else:
+                agent_feat = torch.randn(self.prototype_dim, device=self.agent_prototypes.device)
+                env_feat = torch.randn(self.prototype_dim, device=self.env_prototypes.device)
+        
+        new_agent_proto = self.pct_transfer.transfer_prototype(
+            agent_feat, 'agent', 
+            few_shot_data.get('agent') if few_shot_data else None,
+            top_k, num_finetune_steps
+        )
+        
+        new_env_proto = self.pct_transfer.transfer_prototype(
+            env_feat, 'env',
+            few_shot_data.get('env') if few_shot_data else None,
+            top_k, num_finetune_steps
+        )
+        
+        T = self.agent_prototypes.shape[1]
+        new_agent_proto_expanded = new_agent_proto.unsqueeze(0).expand(T, -1).unsqueeze(0)
+        new_env_proto_expanded = new_env_proto.unsqueeze(0).expand(T, -1).unsqueeze(0)
+        
+        self.agent_prototypes = torch.cat([self.agent_prototypes, new_agent_proto_expanded], dim=0)
+        self.env_prototypes = torch.cat([self.env_prototypes, new_env_proto_expanded], dim=0)
+        
+        self.prototype_num += 1
+        
+        self.masks = self.init_masks()
+        
+        print(f"Adapted to new domain '{new_domain_name}'. Total prototypes: {self.prototype_num}")
+        
+        return new_agent_proto, new_env_proto
+
+    def get_drift_statistics(self):
+        """Get drift statistics from PDC calibrator."""
+        if self.pdc_calibrator is not None:
+            return self.pdc_calibrator.get_drift_statistics()
+        return None
 
     def freeze_trunk(self, num_layers: int = 0):
         """ freeze the trunk parameters in the last num_layers """

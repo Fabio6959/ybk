@@ -97,6 +97,7 @@ def run(cfg):
         reinit=False,
         save_code=False,
         resume="allow",
+        settings=wandb.Settings(init_timeout=300),
     )
     utils.set_seed(cfg.seed)
     print(f"train policy models with pretrained: { cfg.train.pretrained_dir}!")

@@ -3,7 +3,13 @@
 # --------------------------------------------------------
 
 import os
+import sys
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import hydra
+import torch
 
 from hpt.utils import utils
 from hpt import train_test
@@ -19,14 +25,26 @@ def run_eval(cfg):
     utils.set_seed(cfg.seed)
     print(cfg)
 
-    device = "cuda"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     domain_list = [d.strip() for d in cfg.domains.split(",")]
     domain = domain_list[0]
-
+    
+    # 初始化数据集以获取 action_dim
+    print("初始化数据集...")
+    dataset = hydra.utils.instantiate(
+        cfg.dataset, dataset_name=domain, env_rollout_fn=cfg.dataset_generator_func, **cfg.dataset
+    )
+    
     # initialize policy
     policy = hydra.utils.instantiate(cfg.network).to(device)
+    
+    # 更新网络维度
+    from hpt.utils.utils import update_network_dim
+    update_network_dim(cfg, dataset, policy)
+    
     policy.init_domain_stem(domain, cfg.stem)
-    policy.init_domain_head(domain, None, cfg.head)
+    normalizer = dataset.get_normalizer()
+    policy.init_domain_head(domain, normalizer, cfg.head)
     policy.finalize_modules()
     policy.print_model_stats()
     utils.set_seed(cfg.seed)
@@ -37,8 +55,23 @@ def run_eval(cfg):
         from hpt.utils.utils import global_vision_model
         policy.init_encoders("image", global_vision_model)
 
-    # load the full model
-    policy.load_model(os.path.join(cfg.train.pretrained_dir, "model.pth"))
+    # load the model
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    
+    # 优先加载训练好的完整模型，其次加载预训练 trunk
+    trained_model_path = os.path.join(project_root, cfg.train.pretrained_dir, "model.pth")
+    trunk_path = os.path.join(project_root, cfg.train.pretrained_dir, "trunk.pth")
+    
+    if os.path.exists(trained_model_path):
+        print(f"Loading trained full model from: {trained_model_path}")
+        policy.load_model(trained_model_path)
+        print("Loaded complete model (trunk + stem + head).")
+    elif os.path.exists(trunk_path):
+        print(f"Loading pretrained trunk from: {trunk_path}")
+        policy.load_trunk(trunk_path)
+        print("Note: Only trunk loaded. Stem and head are randomly initialized.")
+    else:
+        print("Warning: No pretrained model found. Using random initialization.")
     policy.to(device)
     policy.eval()
     n_parameters = sum(p.numel() for p in policy.parameters() if p.requires_grad)
