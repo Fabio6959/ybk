@@ -177,9 +177,11 @@ class RolloutRunner:
             env.seed(seed)
 
             if self.save_video:
+                # 获取视频帧率，如果不存在则使用默认值 30
+                fps = env.metadata.get("video.frames_per_second", 30)
                 writer = writer_for(
                     tag + f"_{video_postfix}",
-                    env.metadata["video.frames_per_second"],
+                    fps,
                     RESOLUTION,
                     src_folder="output/output_figures/output_videos/metaworld",
                 )
