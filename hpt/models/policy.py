@@ -296,12 +296,14 @@ class Policy(nn.Module):
 
         # DyCoP: Apply Prototype Dynamic Calibration (PDC)
         if self.pdc_calibrator is not None and self.training:
-            self.agent_prototypes, drift_a, is_drifted_a = self.pdc_calibrator(
+            calibrated_agent, drift_a, is_drifted_a = self.pdc_calibrator(
                 f_a, self.agent_prototypes
             )
-            self.env_prototypes, drift_e, is_drifted_e = self.pdc_calibrator(
+            calibrated_env, drift_e, is_drifted_e = self.pdc_calibrator(
                 f_e, self.env_prototypes
             )
+            self.agent_prototypes = calibrated_agent.detach()
+            self.env_prototypes = calibrated_env.detach()
 
         f_a_flat = f_a.view(B, -1)  # [B, T*D]
         f_e_flat = f_e.view(B, -1)
