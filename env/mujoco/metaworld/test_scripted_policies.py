@@ -1,11 +1,8 @@
 import pytest
 import sys
 
-from metaworld.env_dict import ALL_V3_ENVIRONMENTS
+from .envs.mujoco.env_dict import ALL_V1_ENVIRONMENTS, ALL_V2_ENVIRONMENTS
 from metaworld.policies import *
-
-ALL_V1_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
-ALL_V2_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
 
 
 test_cases_old_nonoise = [
