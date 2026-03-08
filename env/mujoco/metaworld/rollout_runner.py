@@ -19,56 +19,56 @@ import traceback
 import json
 
 ALL_TASK_CONFIG = [
-    ("assembly-v3", np.zeros(4), 10000, True, "pick up the pole and put the circle through the cylinder."),
-    ("basketball-v3", np.zeros(4), 10000, True, "pick up the basketball and drop it through the basket."),
-    ("bin-picking-v3", np.zeros(4), 10000, True, "move the block from one bin to another bin."),
-    ("box-close-v3", np.zeros(4), 10000, True, "close the lid of the box."),
-    ("button-press-topdown-v3", np.zeros(4), 10000, True, "press down the button."),
-    ("button-press-topdown-wall-v3", np.zeros(4), 10000, True, "press down the button with one finger."),
-    ("button-press-v3", np.zeros(4), 10000, True, "press in the button with one finger."),
-    ("button-press-wall-v3", np.zeros(4), 100, True, "move between wall and botton and open fingers."),
-    ("coffee-button-v3", np.zeros(4), 10000, True, "touch the coffee mug."),
-    ("coffee-pull-v3", np.zeros(4), 10000, True, "grasp the coffee mug."),
-    ("coffee-push-v3", np.zeros(4), 10000, True, "push the coffee mug."),
-    ("dial-turn-v3", np.zeros(4), 10000, True, "turn the dial with the fingers."),
-    ("disassemble-v3", np.zeros(4), 10000, True, "pull the circle bar out of the cylinder."),
-    ("door-close-v3", np.zeros(4), 10000, True, "close the door with the fingers."),
-    ("door-lock-v3", np.zeros(4), 10000, True, "lock the door."),
-    ("door-open-v3", np.zeros(4), 10000, True, "open the door."),
-    ("door-unlock-v3", np.zeros(4), 10000, True, "unlock the door."),
-    ("hand-insert-v3", np.zeros(4), 10000, True, "pick up the wooden block and put it in the box."),
-    ("drawer-close-v3", np.zeros(4), 10000, True, "close the drawer with the fingers."),
-    ("drawer-open-v3", np.zeros(4), 10000, True, "open the drawer with the fingers."),
-    ("faucet-open-v3", np.zeros(4), 10000, True, "turn the faucet to open."),
-    ("faucet-close-v3", np.zeros(4), 10000, True, "turn the faucet to close."),
-    ("hammer-v3", np.zeros(4), 10000, True, "grasp the hammer and move towards the button."),
-    ("handle-press-side-v3", np.zeros(4), 10000, True, "press the handle down."),
-    ("handle-press-v3", np.zeros(4), 10000, True, "use the side finger to press the handle."),
-    ("handle-pull-side-v3", np.zeros(4), 10000, True, "pull the handle"),
-    ("handle-pull-v3", np.zeros(4), 10000, True, "pull the handle."),
-    ("lever-pull-v3", np.zeros(4), 10000, True, "pull the lever."),
-    ("pick-place-wall-v3", np.zeros(4), 10000, True, "pick the red cylinder and place it at the blue spot."),
-    ("pick-out-of-hole-v3", np.zeros(4), 10000, True, "pick up the red cylinder."),
-    ("push-back-v3", np.zeros(4), 10000, True, "move the wooded brick to the green spot."),
-    ("push-v3", np.zeros(4), 10000, True, "push the red cylinder to the green spot."),
-    ("pick-place-v3", np.zeros(4), 10000, True, "pick up the red cylinder and put it in the blue spot."),
-    ("plate-slide-v3", np.zeros(4), 10000, True, "pick up the gray cylinder and move it to the red bucket."),
-    ("plate-slide-side-v3", np.zeros(4), 10000, True, "push the gray cylinder into the red bucket"),
-    ("plate-slide-back-v3", np.zeros(4), 10000, True, "move the gray cylinder out of the red bucket"),
-    ("plate-slide-back-side-v3", np.zeros(4), 10000, True, "pull the gray cylinder out of the red bucket"),
-    ("peg-insert-side-v3", np.zeros(4), 10000, True, "insert the green peg into the red wall."),
-    ("peg-unplug-side-v3", np.zeros(4), 10000, True, "unplug the gray cylinder out."),
-    ("soccer-v3", np.zeros(4), 10000, True, "push the soccer ball into the goal net."),
-    ("stick-push-v3", np.zeros(4), 10000, True, "pick up the blue box and push the gray."),
-    ("stick-pull-v3", np.zeros(4), 10000, True, "pick the blue box and pull the gray."),
-    ("push-wall-v3", np.zeros(4), 10000, True, "move the red cylinder around the wall to the green spot."),
-    ("reach-wall-v3", np.zeros(4), 10000, True, "reach the red spot on the wall."),
-    ("reach-v3", np.zeros(4), 10000, True, "reach the wall."),
-    ("shelf-place-v3", np.zeros(4), 10000, True, "put the blue block inside the shelf."),
-    ("sweep-into-v3", np.zeros(4), 10000, True, "pick up the wooden block and put inside the hole."),
-    ("sweep-v3", np.zeros(4), 10000, True, "pick the wooden block and then drop it."),
-    ("window-open-v3", np.zeros(4), 10000, True, "open the window by pushing the handle."),
-    ("window-close-v3", np.zeros(4), 10000, True, "close the window by pulling the handle."),
+    ("assembly-v2", np.zeros(4), 10000, True, "pick up the pole and put the circle through the cylinder."),
+    ("basketball-v2", np.zeros(4), 10000, True, "pick up the basketball and drop it through the basket."),
+    ("bin-picking-v2", np.zeros(4), 10000, True, "move the block from one bin to another bin."),
+    ("box-close-v2", np.zeros(4), 10000, True, "close the lid of the box."),
+    ("button-press-topdown-v2", np.zeros(4), 10000, True, "press down the button."),
+    ("button-press-topdown-wall-v2", np.zeros(4), 10000, True, "press down the button with one finger."),
+    ("button-press-v2", np.zeros(4), 10000, True, "press in the button with one finger."),
+    ("button-press-wall-v2", np.zeros(4), 100, True, "move between wall and botton and open fingers."),
+    ("coffee-button-v2", np.zeros(4), 10000, True, "touch the coffee mug."),
+    ("coffee-pull-v2", np.zeros(4), 10000, True, "grasp the coffee mug."),
+    ("coffee-push-v2", np.zeros(4), 10000, True, "push the coffee mug."),
+    ("dial-turn-v2", np.zeros(4), 10000, True, "turn the dial with the fingers."),
+    ("disassemble-v2", np.zeros(4), 10000, True, "pull the circle bar out of the cylinder."),
+    ("door-close-v2", np.zeros(4), 10000, True, "close the door with the fingers."),
+    ("door-lock-v2", np.zeros(4), 10000, True, "lock the door."),
+    ("door-open-v2", np.zeros(4), 10000, True, "open the door."),
+    ("door-unlock-v2", np.zeros(4), 10000, True, "unlock the door."),
+    ("hand-insert-v2", np.zeros(4), 10000, True, "pick up the wooden block and put it in the box."),
+    ("drawer-close-v2", np.zeros(4), 10000, True, "close the drawer with the fingers."),
+    ("drawer-open-v2", np.zeros(4), 10000, True, "open the drawer with the fingers."),
+    ("faucet-open-v2", np.zeros(4), 10000, True, "turn the faucet to open."),
+    ("faucet-close-v2", np.zeros(4), 10000, True, "turn the faucet to close."),
+    ("hammer-v2", np.zeros(4), 10000, True, "grasp the hammer and move towards the button."),
+    ("handle-press-side-v2", np.zeros(4), 10000, True, "press the handle down."),
+    ("handle-press-v2", np.zeros(4), 10000, True, "use the side finger to press the handle."),
+    ("handle-pull-side-v2", np.zeros(4), 10000, True, "pull the handle"),
+    ("handle-pull-v2", np.zeros(4), 10000, True, "pull the handle."),
+    ("lever-pull-v2", np.zeros(4), 10000, True, "pull the lever."),
+    ("pick-place-wall-v2", np.zeros(4), 10000, True, "pick the red cylinder and place it at the blue spot."),
+    ("pick-out-of-hole-v2", np.zeros(4), 10000, True, "pick up the red cylinder."),
+    ("push-back-v2", np.zeros(4), 10000, True, "move the wooded brick to the green spot."),
+    ("push-v2", np.zeros(4), 10000, True, "push the red cylinder to the green spot."),
+    ("pick-place-v2", np.zeros(4), 10000, True, "pick up the red cylinder and put it in the blue spot."),
+    ("plate-slide-v2", np.zeros(4), 10000, True, "pick up the gray cylinder and move it to the red bucket."),
+    ("plate-slide-side-v2", np.zeros(4), 10000, True, "push the gray cylinder into the red bucket"),
+    ("plate-slide-back-v2", np.zeros(4), 10000, True, "move the gray cylinder out of the red bucket"),
+    ("plate-slide-back-side-v2", np.zeros(4), 10000, True, "pull the gray cylinder out of the red bucket"),
+    ("peg-insert-side-v2", np.zeros(4), 10000, True, "insert the green peg into the red wall."),
+    ("peg-unplug-side-v2", np.zeros(4), 10000, True, "unplug the gray cylinder out."),
+    ("soccer-v2", np.zeros(4), 10000, True, "push the soccer ball into the goal net."),
+    ("stick-push-v2", np.zeros(4), 10000, True, "pick up the blue box and push the gray."),
+    ("stick-pull-v2", np.zeros(4), 10000, True, "pick the blue box and pull the gray."),
+    ("push-wall-v2", np.zeros(4), 10000, True, "move the red cylinder around the wall to the green spot."),
+    ("reach-wall-v2", np.zeros(4), 10000, True, "reach the red spot on the wall."),
+    ("reach-v2", np.zeros(4), 10000, True, "reach the wall."),
+    ("shelf-place-v2", np.zeros(4), 10000, True, "put the blue block inside the shelf."),
+    ("sweep-into-v2", np.zeros(4), 10000, True, "pick up the wooden block and put inside the hole."),
+    ("sweep-v2", np.zeros(4), 10000, True, "pick the wooden block and then drop it."),
+    ("window-open-v2", np.zeros(4), 10000, True, "open the window by pushing the handle."),
+    ("window-close-v2", np.zeros(4), 10000, True, "close the window by pulling the handle."),
 ]
 RESOLUTION = (128, 128)
 
@@ -151,21 +151,30 @@ class RolloutRunner:
         all_env_names = [task for (task, _, _, _, lang) in ALL_TASK_CONFIG]
         env_lang_map = {task: lang for (task, _, _, _, lang) in ALL_TASK_CONFIG}
 
-        if type(self.env_names) is not list:
-            env_names = all_env_names
+        if isinstance(self.env_names, str):
+            if self.env_names == "all":
+                env_names = all_env_names
+            else:
+                env_names = self.env_names.split(",")
+        elif isinstance(self.env_names, list):
+            env_names = self.env_names
         else:
-            env_names = self.env_names.split(",")
+            env_names = all_env_names
 
         for env in env_names:
             env = env.strip()
             if env not in all_env_names:
                 continue
 
-            language_instruction = [task for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == env][0]
+            language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == env][0]
             if env_name is not None:
-                env_name = env_name
-                if str(env_name[0]) != str(env):
-                    continue
+                # 处理 env_name 可能是字符串或元组的情况
+                if isinstance(env_name, (list, tuple)):
+                    if str(env_name[0]) != str(env):
+                        continue
+                else:
+                    if str(env_name) != str(env):
+                        continue
 
             print("env_name:", env_name, episode_num)
             tag = env

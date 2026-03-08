@@ -810,7 +810,12 @@ class Policy(nn.Module):
             print("should call policy reset explicitly to avoid problems for evaluation in sequence.")
             self.reset()
 
-        action_dim = len(self.normalizer[domain].params_dict["action"]["input_stats"].min)
+        # 获取 action_dim 的安全方式
+        try:
+            action_dim = len(self.normalizer[domain]["action"].get_input_stats()["min"])
+        except (KeyError, AttributeError):
+            # 如果 normalizer 未初始化，使用默认值 4（metaworld 环境的动作维度）
+            action_dim = 4
         device = next(self.parameters()).device
         data_noimg = {k: v for k, v in data.items() if "image" not in k}
         data_img = {k: v for k, v in data.items() if "image" in k}

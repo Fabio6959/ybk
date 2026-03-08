@@ -188,9 +188,9 @@ def eval_policy_sequential(policy, cfg, eps_num=-1):
 
     total_success_list = []
 
-    for env_name in zip(env_names):
-        success, rewards = eval_policy(policy, cfg, env_name, eps_num)
+    for env_name in env_names:
+        success, reward = eval_policy(policy, cfg, env_name, eps_num)
         total_success_list.append(success)
 
-    total_rewards = {env_name: rew for env_name, rew in zip(env_names, total_success_list)}
+    total_rewards = {env_name: success_rate for env_name, success_rate in zip(env_names, total_success_list)}
     return total_rewards
