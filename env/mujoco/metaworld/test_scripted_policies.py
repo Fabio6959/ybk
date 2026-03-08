@@ -1,8 +1,11 @@
 import pytest
 import sys
 
-from .envs.mujoco.env_dict import ALL_V1_ENVIRONMENTS, ALL_V2_ENVIRONMENTS
+from metaworld.env_dict import ALL_V3_ENVIRONMENTS
 from metaworld.policies import *
+
+ALL_V1_ENVIRONMENTS = {k.replace('-v3', '-v1'): v for k, v in ALL_V3_ENVIRONMENTS.items()}
+ALL_V2_ENVIRONMENTS = {k.replace('-v3', '-v2'): v for k, v in ALL_V3_ENVIRONMENTS.items()}
 
 
 test_cases_old_nonoise = [
