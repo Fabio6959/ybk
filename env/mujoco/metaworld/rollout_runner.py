@@ -151,18 +151,12 @@ class RolloutRunner:
         all_env_names = [task for (task, _, _, _, lang) in ALL_TASK_CONFIG]
         env_lang_map = {task: lang for (task, _, _, _, lang) in ALL_TASK_CONFIG}
 
-        if isinstance(self.env_names, str):
-            if self.env_names == "all":
-                env_names = all_env_names
-            else:
-                env_names = self.env_names.split(",")
-        elif isinstance(self.env_names, list):
-            env_names = self.env_names
-        else:
-            env_names = all_env_names
-
-        for env in env_names:
-            env = env.strip()
+        # 直接使用 env_name 作为环境名称
+        if env_name is not None:
+            env = env_name
+            if isinstance(env, (list, tuple)):
+                env = env[0]
+            env = str(env).strip()
             
             # 处理 v3 版本的环境名称
             base_env_name = env
@@ -171,18 +165,10 @@ class RolloutRunner:
             
             # 检查环境是否存在
             if base_env_name not in all_env_names:
-                continue
+                return 0.0, 0.0
 
             # 获取语言指令
             language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == base_env_name][0]
-            if env_name is not None:
-                # 处理 env_name 可能是字符串或元组的情况
-                if isinstance(env_name, (list, tuple)):
-                    if str(env_name[0]) != str(env):
-                        continue
-                else:
-                    if str(env_name) != str(env):
-                        continue
 
             print("env_name:", env_name, episode_num)
             tag = env
@@ -234,9 +220,86 @@ class RolloutRunner:
             except Exception as e:
                 print(traceback.format_exc())
             return total_success / episode_num, total_reward / episode_num
+    
+    # 原始逻辑，当 env_name 为 None 时遍历所有环境
+    if isinstance(self.env_names, str):
+        if self.env_names == "all":
+            env_names = all_env_names
+        else:
+            env_names = self.env_names.split(",")
+    elif isinstance(self.env_names, list):
+        env_names = self.env_names
+    else:
+        env_names = all_env_names
+
+    for env in env_names:
+        env = env.strip()
         
-        # 如果没有找到匹配的环境，返回默认值
-        return 0.0, 0.0
+        # 处理 v3 版本的环境名称
+        base_env_name = env
+        if env.endswith("-v3"):
+            base_env_name = env.replace("-v3", "-v2")
+        
+        # 检查环境是否存在
+        if base_env_name not in all_env_names:
+            continue
+
+        # 获取语言指令
+        language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == base_env_name][0]
+
+        print("env_name:", env_name, episode_num)
+        tag = env
+        env_keys = sorted(list(ALL_ENVS.keys()))
+        env = ALL_ENVS[env]()
+        env._partially_observable = False
+        env._freeze_rand_vec = False
+        env._set_task_called = True
+        env.seed(seed)
+
+        if self.save_video:
+            # 获取视频帧率，如果不存在则使用默认值 30
+            fps = env.metadata.get("video.frames_per_second", 30)
+            writer = writer_for(
+                tag + f"_{video_postfix}",
+                fps,
+                RESOLUTION,
+                src_folder="output/output_figures/output_videos/metaworld",
+            )
+
+        total_success = 0
+        total_reward = 0
+        pbar = tqdm(range(episode_num), position=1, leave=True)
+        try:
+            for i in pbar:
+                eps_reward = 0
+                traj_length = 0
+                q_pos = []
+
+                step = 0
+                for o, r, done, info, img in learner_trajectory_generator(env, policy, language_instruction):
+                    traj_length += 1
+                    eps_reward += r
+                    
+                    if gui or self.gui:
+                        cv2.imshow("img", img)
+                        cv2.waitKey(1)
+                    
+                    if self.save_video and i <= 5:
+                        writer.write(img)
+
+                    if info["success"]:
+                        break
+
+                    step += 1
+                pbar.set_description(f"success: {info['success']}")
+                total_success += info["success"]
+                total_reward += eps_reward
+        except Exception as e:
+            print(traceback.format_exc())
+        return total_success / episode_num, total_reward / episode_num
+
+    # 如果没有找到匹配的环境，返回默认值
+    return 0.0, 0.0
 
 
 @torch.no_grad()
