@@ -6,6 +6,7 @@ from metaworld.policies import *
 
 ALL_V1_ENVIRONMENTS = {k.replace('-v3', '-v1'): v for k, v in ALL_V3_ENVIRONMENTS.items()}
 ALL_V2_ENVIRONMENTS = {k.replace('-v3', '-v2'): v for k, v in ALL_V3_ENVIRONMENTS.items()}
+ALL_V3_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
 
 
 test_cases_old_nonoise = [
@@ -225,7 +226,7 @@ for row in test_cases_latest_nonoise:
 for row in test_cases_latest_noisy:
     test_cases.append(pytest.param(*row, marks=pytest.mark.basic))
 
-ALL_ENVS = {**ALL_V1_ENVIRONMENTS, **ALL_V2_ENVIRONMENTS}
+ALL_ENVS = {**ALL_V1_ENVIRONMENTS, **ALL_V2_ENVIRONMENTS, **ALL_V3_ENVIRONMENTS}
 
 
 @pytest.fixture(scope="function")
