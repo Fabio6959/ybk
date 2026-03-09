@@ -234,6 +234,9 @@ class RolloutRunner:
             except Exception as e:
                 print(traceback.format_exc())
             return total_success / episode_num, total_reward / episode_num
+        
+        # 如果没有找到匹配的环境，返回默认值
+        return 0.0, 0.0
 
 
 @torch.no_grad()
