@@ -163,10 +163,18 @@ class RolloutRunner:
 
         for env in env_names:
             env = env.strip()
-            if env not in all_env_names:
+            
+            # 处理 v3 版本的环境名称
+            base_env_name = env
+            if env.endswith("-v3"):
+                base_env_name = env.replace("-v3", "-v2")
+            
+            # 检查环境是否存在
+            if base_env_name not in all_env_names:
                 continue
 
-            language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == env][0]
+            # 获取语言指令
+            language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == base_env_name][0]
             if env_name is not None:
                 # 处理 env_name 可能是字符串或元组的情况
                 if isinstance(env_name, (list, tuple)):
