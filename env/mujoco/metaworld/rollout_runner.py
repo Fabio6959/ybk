@@ -274,12 +274,37 @@ def generate_dataset_rollouts(
     print("metaworld env names:", env_names)
     for env in env_names:
         env = env.strip()
-        if env not in all_env_names:
+        
+        # 处理 v3 版本的环境名称
+        base_env_name = env
+        if env.endswith("-v3"):
+            base_env_name = env.replace("-v3", "-v2")
+        
+        # 检查环境是否存在
+        if base_env_name not in all_env_names:
             continue
 
-        language_instruction = [task for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == env][0]
+        # 获取语言指令
+        language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == base_env_name][0]
         tag = env
-        policy = functools.reduce(lambda a, b: a if a[0] == env else b, test_cases_latest_nonoise)[1]
+        
+        # 查找对应的策略
+        # 处理 v3 版本的环境名称，使用 v2 的策略
+        policy_env_name = env
+        if env.endswith("-v3"):
+            policy_env_name = env.replace("-v3", "-v2")
+        
+        # 查找对应的策略
+        policy = None
+        for test_case in test_cases_latest_nonoise:
+            if test_case[0] == policy_env_name:
+                policy = test_case[1]
+                break
+        
+        if policy is None:
+            print(f"No policy found for {policy_env_name}")
+            continue
+        
         env_keys = sorted(list(ALL_ENVS.keys()))
         env = ALL_ENVS[env]()
         env._partially_observable = False

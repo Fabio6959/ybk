@@ -333,8 +333,10 @@ class LocalTrajDataset:
         # split into train and test sets
         self.val_mask = get_val_mask(n_episodes=self.replay_buffer.n_episodes, val_ratio=val_ratio, seed=seed)
         self.train_mask = ~self.val_mask
-        if self.train_mask.sum() == 0:
-            self.train_mask = self.val_mask
+        
+        # 确保至少有一个训练episode
+        if self.train_mask.sum() == 0 and self.replay_buffer.n_episodes > 0:
+            self.train_mask = np.ones_like(self.val_mask, dtype=bool)
 
         # considering hyperparameters and masking
         n_episodes = int(self.data_ratio * min(self.episode_cnt, self.replay_buffer.n_episodes))

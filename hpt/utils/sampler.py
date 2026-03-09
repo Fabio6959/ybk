@@ -51,7 +51,7 @@ def create_indices(
 
 def get_val_mask(n_episodes, val_ratio, seed=0):
     val_mask = np.zeros(n_episodes, dtype=bool)
-    if val_ratio <= 0:
+    if val_ratio <= 0 or n_episodes < 2:
         return val_mask
 
     # have at least 1 episode for validation, and at least 1 episode for train
