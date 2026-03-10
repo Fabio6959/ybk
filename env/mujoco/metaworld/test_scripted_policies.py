@@ -6,6 +6,7 @@ from metaworld.policies import *
 
 ALL_V1_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
 ALL_V2_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
+ALL_V3_ENVIRONMENTS = ALL_V3_ENVIRONMENTS
 
 
 test_cases_old_nonoise = [
@@ -121,6 +122,57 @@ test_cases_latest_nonoise = [
     ["sweep-v2", SawyerSweepV3Policy(), 0.0, 0.99],
     ["window-close-v2", SawyerWindowCloseV3Policy(), 0.0, 0.98],
     ["window-open-v2", SawyerWindowOpenV3Policy(), 0.0, 0.94],
+    # V3 environments
+    ["assembly-v3", SawyerAssemblyV3Policy(), 0.0, 1.0],
+    ["basketball-v3", SawyerBasketballV3Policy(), 0.0, 0.98],
+    ["bin-picking-v3", SawyerBinPickingV3Policy(), 0.0, 0.98],
+    ["box-close-v3", SawyerBoxCloseV3Policy(), 0.0, 0.90],
+    ["button-press-topdown-v3", SawyerButtonPressTopdownV3Policy(), 0.0, 0.95],
+    ["button-press-topdown-wall-v3", SawyerButtonPressTopdownWallV3Policy(), 0.0, 0.95],
+    ["button-press-v3", SawyerButtonPressV3Policy(), 0.0, 1.0],
+    ["button-press-wall-v3", SawyerButtonPressWallV3Policy(), 0.0, 0.93],
+    ["coffee-button-v3", SawyerCoffeeButtonV3Policy(), 0.0, 1.0],
+    ["coffee-pull-v3", SawyerCoffeePullV3Policy(), 0.0, 0.94],
+    ["coffee-push-v3", SawyerCoffeePushV3Policy(), 0.0, 0.93],
+    ["dial-turn-v3", SawyerDialTurnV3Policy(), 0.0, 0.96],
+    ["disassemble-v3", SawyerDisassembleV3Policy(), 0.0, 0.92],
+    ["door-close-v3", SawyerDoorCloseV3Policy(), 0.0, 0.99],
+    ["door-lock-v3", SawyerDoorLockV3Policy(), 0.0, 1.0],
+    ["door-open-v3", SawyerDoorOpenV3Policy(), 0.0, 0.94],
+    ["door-unlock-v3", SawyerDoorUnlockV3Policy(), 0.0, 1.0],
+    ["hand-insert-v3", SawyerHandInsertV3Policy(), 0.0, 0.96],
+    ["drawer-close-v3", SawyerDrawerCloseV3Policy(), 0.0, 0.99],
+    ["drawer-open-v3", SawyerDrawerOpenV3Policy(), 0.0, 0.99],
+    ["faucet-open-v3", SawyerFaucetOpenV3Policy(), 0.0, 1.0],
+    ["faucet-close-v3", SawyerFaucetCloseV3Policy(), 0.0, 1.0],
+    ["hammer-v3", SawyerHammerV3Policy(), 0.0, 1.0],
+    ["handle-press-side-v3", SawyerHandlePressSideV3Policy(), 0.0, 0.99],
+    ["handle-press-v3", SawyerHandlePressV3Policy(), 0.0, 1.0],
+    ["handle-pull-side-v3", SawyerHandlePullSideV3Policy(), 0.0, 1.0],
+    ["handle-pull-v3", SawyerHandlePullV3Policy(), 0.0, 0.93],
+    ["lever-pull-v3", SawyerLeverPullV3Policy(), 0.0, 0.94],
+    ["pick-place-wall-v3", SawyerPickPlaceWallV3Policy(), 0.0, 0.95],
+    ["pick-out-of-hole-v3", SawyerPickOutOfHoleV3Policy(), 0.0, 1.0],
+    ["pick-place-v3", SawyerPickPlaceV3Policy(), 0.0, 0.95],
+    ["plate-slide-v3", SawyerPlateSlideV3Policy(), 0.0, 1.0],
+    ["plate-slide-side-v3", SawyerPlateSlideSideV3Policy(), 0.0, 1.0],
+    ["plate-slide-back-v3", SawyerPlateSlideBackV3Policy(), 0.0, 1.0],
+    ["plate-slide-back-side-v3", SawyerPlateSlideBackSideV3Policy(), 0.0, 1.0],
+    ["peg-insert-side-v3", SawyerPegInsertionSideV3Policy(), 0.0, 0.89],
+    ["peg-unplug-side-v3", SawyerPegUnplugSideV3Policy(), 0.0, 0.99],
+    ["soccer-v3", SawyerSoccerV3Policy(), 0.0, 0.88],
+    ["stick-push-v3", SawyerStickPushV3Policy(), 0.0, 0.98],
+    ["stick-pull-v3", SawyerStickPullV3Policy(), 0.0, 0.96],
+    ["push-v3", SawyerPushV3Policy(), 0.0, 0.97],
+    ["push-wall-v3", SawyerPushWallV3Policy(), 0.0, 0.97],
+    ["push-back-v3", SawyerPushBackV3Policy(), 0.0, 0.97],
+    ["reach-v3", SawyerReachV3Policy(), 0.0, 0.99],
+    ["reach-wall-v3", SawyerReachWallV3Policy(), 0.0, 0.98],
+    ["shelf-place-v3", SawyerShelfPlaceV3Policy(), 0.0, 0.96],
+    ["sweep-into-v3", SawyerSweepIntoV3Policy(), 0.0, 0.98],
+    ["sweep-v3", SawyerSweepV3Policy(), 0.0, 0.99],
+    ["window-open-v3", SawyerWindowOpenV3Policy(), 0.0, 0.94],
+    ["window-close-v3", SawyerWindowCloseV3Policy(), 0.0, 0.98],
 ]
 
 test_cases_latest_noisy = [
@@ -225,7 +277,7 @@ for row in test_cases_latest_nonoise:
 for row in test_cases_latest_noisy:
     test_cases.append(pytest.param(*row, marks=pytest.mark.basic))
 
-ALL_ENVS = {**ALL_V1_ENVIRONMENTS, **ALL_V2_ENVIRONMENTS}
+ALL_ENVS = {**ALL_V1_ENVIRONMENTS, **ALL_V2_ENVIRONMENTS, **ALL_V3_ENVIRONMENTS}
 
 
 @pytest.fixture(scope="function")
