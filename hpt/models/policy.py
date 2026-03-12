@@ -248,10 +248,9 @@ class Policy(nn.Module):
             nn.Linear(3 * self.prototype_dim, embed_dim)
         )
 
-        # self.agent_prototypes = None  # shape: (num_proto, D)
-        # self.env_prototypes = None
-        self.register_buffer("agent_prototypes", torch.zeros(self.prototype_num, 32, self.prototype_dim))
-        self.register_buffer("env_prototypes", torch.zeros(self.prototype_num, 32, self.prototype_dim))
+        # 重构为 2D 纯语义特征向量，彻底解耦序列长度
+        self.register_buffer("agent_prototypes", torch.randn(self.prototype_num, self.embed_dim))
+        self.register_buffer("env_prototypes", torch.randn(self.prototype_num, self.embed_dim))
 
         self.prototype_momentum = 0.9
         
@@ -487,73 +486,38 @@ class Policy(nn.Module):
                                     masks[mask_idx] = (1 - importance) * masks[mask_idx] + importance * new_mask
                                 mask_idx += 1
     
-    def feature2proto(self, tokens: torch.Tensor, text_features: torch.Tensor = None) -> torch.Tensor:
-        B, T, _ = tokens.shape
-        P = self.prototype_num
-        D = self.prototype_dim
+    def feature2proto(self, tokens, text_features=None):
+        B, L, D = tokens.shape
         
-        # Agent encoding
-        f_a = self.agent_head(tokens)
+        pooled_tokens = tokens.mean(dim=1)
         
-        # Env encoding
-        f_e = self.env_head(tokens)
+        task_protos = self.task_encoder.task_prototypes
+        agent_protos = self.agent_prototypes.clone()
+        env_protos = self.env_prototypes.clone()
         
-        # Task encoding (if text features provided)
-        if text_features is not None and hasattr(self, 'task_encoder'):
-            # Use TaskEncoder to get task routing weights
-            w_t = self.task_encoder(text_features)  # [B, N_t]
-            # Project to prototype space
-            f_t = self.task_head(tokens)  # [B, T, D]
-            # Use task prototypes from TaskEncoder
-            proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
-        else:
-            # Fallback: use task_head on tokens if no text features
-            f_t = self.task_head(tokens)
-            # Compute routing weights from task prototypes
-            proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
-            f_t_flat = f_t.view(B, -1)
-            w_t = torch.softmax(torch.matmul(f_t_flat, proto_t_flat.T), dim=-1)  # [B, N_t]
+        w_t = torch.softmax(torch.matmul(pooled_tokens, task_protos.T), dim=-1)
+        w_a = torch.softmax(torch.matmul(pooled_tokens, agent_protos.T), dim=-1)
+        w_e = torch.softmax(torch.matmul(pooled_tokens, env_protos.T), dim=-1)
         
-        # Initialize prototypes if not exists
-        if torch.all(self.agent_prototypes == 0):
-            self.agent_prototypes = self._init_prototypes(f_a, self.prototype_num)
-            self.env_prototypes = self._init_prototypes(f_e, self.prototype_num)
-            # Don't reinitialize task_prototypes as they're already nn.Parameter
-
-        # Compute routing weights for each prototype type
-        f_a_flat = f_a.view(B, -1)  # [B, T*D]
-        f_e_flat = f_e.view(B, -1)
-        
-        proto_a_flat = self.agent_prototypes.view(P, -1)  # [P, T*D]
-        proto_e_flat = self.env_prototypes.view(P, -1)
-        
-        w_a = torch.softmax(torch.matmul(f_a_flat, proto_a_flat.T), dim=-1)  # [B, P]
-        w_e = torch.softmax(torch.matmul(f_e_flat, proto_e_flat.T), dim=-1)  # [B, P]
-        
-        # 3D tensor product for routing weights
-        # w_route: [B, N_a * N_e * N_t]
         w_route = torch.einsum('bi, bj, bk -> bijk', w_a, w_e, w_t).reshape(B, -1)
         
-        # Compute prototype features
-        p_a = torch.matmul(w_a, proto_a_flat).view(B, T, D)  # [B, T, D]
-        p_e = torch.matmul(w_e, proto_e_flat).view(B, T, D)  # [B, T, D]
+        combined_features = torch.matmul(w_a, agent_protos) + torch.matmul(w_e, env_protos) + torch.matmul(w_t, task_protos)
         
-        # Compute task prototype features
-        proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
-        p_t = torch.matmul(w_t, proto_t_flat).view(B, T, D)  # [B, T, D]
+        proto_tokens = combined_features.unsqueeze(1).expand(-1, L, -1)
         
-        # Store routing weights for MoLoRA
         self.current_w_a = w_a.detach()
         self.current_w_e = w_e.detach()
         self.current_w_t = w_t.detach()
         
-        # Decode with 3 prototypes
-        trunk_tokens_rec = self.decoder(torch.cat([p_a, p_e, p_t], dim=-1))  # [B, T, D]
+        with torch.no_grad():
+            self.agent_prototypes.copy_(
+                self._update_prototypes(self.agent_prototypes, pooled_tokens.detach(), w_a.detach())
+            )
+            self.env_prototypes.copy_(
+                self._update_prototypes(self.env_prototypes, pooled_tokens.detach(), w_e.detach())
+            )
         
-        # Update prototypes with momentum (only agent and env, task prototypes are learnable)
-        self.agent_prototypes = self._update_prototypes(self.agent_prototypes, f_a.detach(), w_a.detach())
-        self.env_prototypes = self._update_prototypes(self.env_prototypes, f_e.detach(), w_e.detach())
-        # Task prototypes are learnable nn.Parameter, don't update with momentum
+        trunk_tokens_rec = proto_tokens
         
         return trunk_tokens_rec, w_route
 
@@ -573,37 +537,36 @@ class Policy(nn.Module):
         # proto_tokens = self.feature2proto(tokens)
         return tokens, ori_tokens, proto_tokens, w_route
     
-    def _init_prototypes(self, features: torch.Tensor, num_proto: int):
-        B, T, D = features.shape
-        features_flat = features.view(B, -1).detach().cpu().numpy()  # [B, T*D]
-        
-        # Use KMeans if we have enough samples, otherwise use random initialization
-        if B >= num_proto:
-            kmeans = KMeans(n_clusters=num_proto, random_state=0, n_init='auto').fit(features_flat)
-            centers = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32).view(num_proto, T, D)
+    def _init_prototypes(self, pooled_features: torch.Tensor, num_proto: int):
+        """Initialize prototypes using KMeans or random initialization.
+
+        Args:
+            pooled_features: [B, embed_dim]
+            Returns: [num_proto, embed_dim]
+        """
+        if pooled_features.shape[0] >= num_proto:
+            features_np = pooled_features.detach().cpu().numpy()
+            kmeans = KMeans(n_clusters=num_proto, random_state=0, n_init='auto').fit(features_np)
+            centers = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32)
         else:
-            # Not enough samples for KMeans, use random initialization
-            # Sample from the available features
-            if B > 0:
-                # Randomly sample from available features
-                indices = torch.randperm(B * T)[:num_proto]
-                sampled_features = features_flat[indices]
-                centers = sampled_features.view(num_proto, T, D)
-            else:
-                # No features available, use random initialization
-                centers = torch.randn(num_proto, T, D) * 0.02
+            centers = torch.randn(num_proto, pooled_features.shape[1]) * 0.02
         
-        return centers.to(features.device)
+        return centers.to(pooled_features.device)
 
-    def _update_prototypes(self, prototypes, features, weights):
-        B, T, D = features.shape
+    def _update_prototypes(self, prototypes: torch.Tensor, pooled_features: torch.Tensor, weights: torch.Tensor):
+        """Update prototypes using momentum EMA.
+
+        Args:
+            prototypes: [P, embed_dim]
+            pooled_features: [B, embed_dim] from Mean Pooling
+            weights: [B, P] routing weights
+        """
         P = prototypes.shape[0]
-
-        features_flat = features.view(B, -1)  # [B, T*D]
-        norm_weights = weights / (weights.sum(dim=0, keepdim=True) + 1e-6)  # [B, P]
-        proto_update_flat = torch.matmul(norm_weights.T, features_flat)  # [P, T*D]
-        proto_update = proto_update_flat.view(P, T, D)
-
+        
+        norm_weights = weights / (weights.sum(dim=0, keepdim=True) + 1e-6)
+        
+        proto_update = torch.matmul(norm_weights.T, pooled_features)
+        
         updated = self.prototype_momentum * prototypes + (1 - self.prototype_momentum) * proto_update
         return updated
 
