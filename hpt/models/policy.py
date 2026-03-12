@@ -31,9 +31,6 @@ from hpt.utils.utils import (
     get_t5_embeddings,
 )
 
-from hpt.models.prototype_calibration import PrototypeDynamicCalibrator
-from hpt.models.prototype_transfer import PrototypeCrossDomainTransfer
-
 STD_SCALE = 0.02
 
 
@@ -69,67 +66,21 @@ def compute_ortho_loss(prototypes: torch.Tensor) -> torch.Tensor:
 
 
 class TaskEncoder(nn.Module):
-    """
-    Task Encoder for encoding task intentions into task prototypes.
-    Uses learnable task prototypes with orthogonal regularization.
-    """
-    def __init__(self, text_dim: int = 512, embed_dim: int = 1024, num_task_protos: int = 6):
+    def __init__(self, embed_dim=128, num_task_protos=21):
         super().__init__()
-        self.text_dim = text_dim
         self.embed_dim = embed_dim
         self.num_task_protos = num_task_protos
         
-        # MLP to project text features to embedding space
-        self.text_proj = nn.Sequential(
-            nn.Linear(text_dim, embed_dim),
-            nn.ReLU(),
-            nn.Linear(embed_dim, embed_dim)
-        )
+        # 形状 [21, 128]
+        self.task_prototypes = nn.Parameter(torch.randn(self.num_task_protos, self.embed_dim))
         
-        # Semantic projection layer for prototype features
-        # Input: embed_dim (1024), Output: 512
-        self.semantic_proj = nn.Linear(embed_dim, 512)
-        
-        # Task prototypes as learnable parameters (端到端学习)
-        # Shape: [num_task_protos, embed_dim] = [6, 1024]
-        self.task_prototypes = nn.Parameter(torch.randn(num_task_protos, embed_dim) * 0.02)
-    
-    def forward(self, text_features: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            text_features: [B, text_dim] or [B, T, text_dim] text embeddings
-        
-        Returns:
-            w_t: [B, N_t] routing weights for task prototypes
-        """
-        if text_features.dim() == 3:
-            text_features = text_features.mean(dim=1)
-        
-        # Project to embedding space
-        text_embed = self.text_proj(text_features)  # [B, embed_dim]
-        
-        # Compute similarity with task prototypes
-        # Normalize for cosine similarity
-        text_embed_norm = F.normalize(text_embed, p=2, dim=-1)  # [B, embed_dim]
-        task_prototypes_norm = F.normalize(self.task_prototypes, p=2, dim=-1)  # [N_t, embed_dim]
-        
-        # Compute similarity scores
-        sim_scores = torch.matmul(text_embed_norm, task_prototypes_norm.T)  # [B, N_t]
-        
-        # Softmax to get routing weights
-        w_t = torch.softmax(sim_scores, dim=-1)  # [B, N_t]
-        
+        # 将 128维映射到 CLIP 文本特征的 512维
+        self.semantic_proj = nn.Linear(self.embed_dim, 512)
+
+    def forward(self, text_features):
+        # 计算路由权重
+        w_t = F.softmax(torch.matmul(text_features, self.task_prototypes.T), dim=-1)
         return w_t
-    
-    def compute_ortho_loss(self) -> torch.Tensor:
-        """
-        Compute orthogonal loss for task prototypes to prevent mode collapse.
-        """
-        task_prototypes_norm = F.normalize(self.task_prototypes, p=2, dim=-1)  # [N_t, embed_dim]
-        sim_matrix = torch.matmul(task_prototypes_norm, task_prototypes_norm.T)  # [N_t, N_t]
-        identity = torch.eye(self.num_task_protos, device=sim_matrix.device)
-        loss = F.mse_loss(sim_matrix, identity, reduction='sum')
-        return loss
 
 
 class MoLoRALayer(nn.Module):
@@ -262,7 +213,7 @@ class Policy(nn.Module):
         # agent/env/task prototype 
         self.prototype_num = 6
         self.prototype_dim = 64
-        self.num_task_protos = 6
+        self.num_task_protos = 21
         self.lora_r = 64  # LoRA rank
 
         # self.agent_head = nn.Linear(32 * embed_dim, embed_dim)
@@ -288,14 +239,10 @@ class Policy(nn.Module):
         
         # Task encoder for processing text features
         self.task_encoder = TaskEncoder(
-            text_dim=self.text_dim,
             embed_dim=embed_dim,
             num_task_protos=self.num_task_protos
         )
         
-        # Task prototypes as learnable parameters (端到端学习)
-        self.task_prototypes = nn.Parameter(torch.randn(self.num_task_protos, 32, self.prototype_dim) * 0.02)
-
         # self.decoder = nn.Linear(2 * embed_dim, embed_dim)
         self.decoder = nn.Sequential(
             nn.Linear(3 * self.prototype_dim, embed_dim)
@@ -322,17 +269,12 @@ class Policy(nn.Module):
         self.current_w_a = None
         self.current_w_e = None
         self.current_w_t = None
-
-        # DyCoP: Prototype Dynamic Calibrator (PDC)
-        self.pdc_calibrator = PrototypeDynamicCalibrator(
-            prototype_dim=self.prototype_dim,
-            hidden_dim=self.embed_dim // 2,
-            threshold=0.3
-        )
-
-        # DyCoP: Prototype Cross-domain Transfer (PCT)
-        self.pct_transfer = None  # Will be initialized with source prototypes
-
+        
+        # === 语义对齐新增：注册 CLIP 文本锚点 ===
+        # 模拟 metaworld 21个任务的 CLIP text embeddings (512维)
+        dummy_clip_features = torch.randn(21, 512)
+        dummy_clip_features = F.normalize(dummy_clip_features, p=2, dim=-1)  # L2归一化
+        self.register_buffer("task_clip_anchors", dummy_clip_features)
 
     def _init_molora_layers(self):
         """Initialize MoLoRA layers and directly replace target layers in trunk."""
@@ -562,11 +504,13 @@ class Policy(nn.Module):
             w_t = self.task_encoder(text_features)  # [B, N_t]
             # Project to prototype space
             f_t = self.task_head(tokens)  # [B, T, D]
+            # Use task prototypes from TaskEncoder
+            proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
         else:
             # Fallback: use task_head on tokens if no text features
             f_t = self.task_head(tokens)
             # Compute routing weights from task prototypes
-            proto_t_flat = self.task_prototypes.view(self.num_task_protos, -1)
+            proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
             f_t_flat = f_t.view(B, -1)
             w_t = torch.softmax(torch.matmul(f_t_flat, proto_t_flat.T), dim=-1)  # [B, N_t]
         
@@ -575,17 +519,6 @@ class Policy(nn.Module):
             self.agent_prototypes = self._init_prototypes(f_a, self.prototype_num)
             self.env_prototypes = self._init_prototypes(f_e, self.prototype_num)
             # Don't reinitialize task_prototypes as they're already nn.Parameter
-
-        # DyCoP: Apply Prototype Dynamic Calibration (PDC)
-        if self.pdc_calibrator is not None and self.training:
-            calibrated_agent, drift_a, is_drifted_a = self.pdc_calibrator(
-                f_a, self.agent_prototypes
-            )
-            calibrated_env, drift_e, is_drifted_e = self.pdc_calibrator(
-                f_e, self.env_prototypes
-            )
-            self.agent_prototypes = calibrated_agent.detach()
-            self.env_prototypes = calibrated_env.detach()
 
         # Compute routing weights for each prototype type
         f_a_flat = f_a.view(B, -1)  # [B, T*D]
@@ -606,7 +539,7 @@ class Policy(nn.Module):
         p_e = torch.matmul(w_e, proto_e_flat).view(B, T, D)  # [B, T, D]
         
         # Compute task prototype features
-        proto_t_flat = self.task_prototypes.view(self.num_task_protos, -1)
+        proto_t_flat = self.task_encoder.task_prototypes.view(self.num_task_protos, -1)
         p_t = torch.matmul(w_t, proto_t_flat).view(B, T, D)  # [B, T, D]
         
         # Store routing weights for MoLoRA
@@ -832,11 +765,31 @@ class Policy(nn.Module):
             loss_ortho_env = compute_ortho_loss(self.env_prototypes)
             loss += 0.01 * loss_ortho_env  # Weight for env prototypes
         
-        if hasattr(self, 'task_prototypes') and self.task_prototypes is not None and len(self.task_prototypes) > 0:
-            loss_ortho_task = compute_ortho_loss(self.task_prototypes)
-            loss += 0.01 * loss_ortho_task  # Weight for task prototypes
+        # 计算并加上大模型语义对齐损失 (权重设为 0.1)
+        semantic_loss = self.calc_semantic_loss()
+        loss = loss + 0.1 * semantic_loss
         
         return loss
+    
+    def calc_semantic_loss(self):
+        """计算 Task 原型的语义对齐损失"""
+        if not hasattr(self, 'task_encoder') or not hasattr(self, 'task_clip_anchors'):
+            return torch.tensor(0.0, device=self.device if hasattr(self, 'device') else 'cuda')
+
+        # 1. 获取合法的原型参数: 形状 [4, 1024]
+        task_protos = self.task_encoder.task_prototypes
+
+        # 2. 投影到 CLIP 维度: 形状 [4, 512]
+        proj_task = self.task_encoder.semantic_proj(task_protos)
+
+        # 3. 计算与 CLIP anchors 的余弦相似度
+        # proj_task: [4, 512], task_clip_anchors: [4, 512]
+        sim = F.cosine_similarity(proj_task, self.task_clip_anchors, dim=-1)
+        
+        # 4. 相似度越高越好，所以 loss 是 1 - 相似度
+        semantic_loss = (1.0 - sim).mean()
+        
+        return semantic_loss
 
     def forward(self, domain: str, data: dict, text_features: torch.Tensor = None):
         """
@@ -900,97 +853,6 @@ class Policy(nn.Module):
                 path = path.replace("output/", "")
             path = download_from_huggingface(path[len("hf://") :])
             self.trunk.load_state_dict(torch.load(path), strict=True)
-
-    def init_pct_transfer(self):
-        """Initialize PCT transfer module with current prototypes as source."""
-        self.pct_transfer = PrototypeCrossDomainTransfer(
-            prototype_dim=self.prototype_dim,
-            hidden_dim=self.embed_dim,
-            source_prototypes={
-                'agent': self.agent_prototypes,
-                'env': self.env_prototypes
-            }
-        )
-
-    def adapt_to_new_domain(
-        self, 
-        new_domain_name: str, 
-        few_shot_data: Optional[dict] = None,
-        top_k: int = 3,
-        num_finetune_steps: int = 10
-    ):
-        """
-        DyCoP: Adapt to new agent/environment domain using PCT.
-        
-        Args:
-            new_domain_name: name of the new domain
-            few_shot_data: dict with 'agent' and 'env' few-shot data tensors
-            top_k: number of similar prototypes to retrieve
-            num_finetune_steps: number of fine-tuning steps
-        """
-        if self.pct_transfer is None:
-            self.init_pct_transfer()
-        
-        with torch.no_grad():
-            if few_shot_data is not None:
-                agent_data = few_shot_data.get('agent')
-                env_data = few_shot_data.get('env')
-                
-                if agent_data is not None:
-                    if agent_data.dim() == 3:
-                        agent_feat = agent_data.mean(dim=[0, 1])
-                    elif agent_data.dim() == 2:
-                        agent_feat = agent_data.mean(dim=0)
-                    else:
-                        agent_feat = agent_data
-                else:
-                    agent_feat = torch.randn(self.prototype_dim, device=self.agent_prototypes.device)
-                
-                if env_data is not None:
-                    if env_data.dim() == 3:
-                        env_feat = env_data.mean(dim=[0, 1])
-                    elif env_data.dim() == 2:
-                        env_feat = env_data.mean(dim=0)
-                    else:
-                        env_feat = env_data
-                else:
-                    env_feat = torch.randn(self.prototype_dim, device=self.env_prototypes.device)
-            else:
-                agent_feat = torch.randn(self.prototype_dim, device=self.agent_prototypes.device)
-                env_feat = torch.randn(self.prototype_dim, device=self.env_prototypes.device)
-        
-        new_agent_proto = self.pct_transfer.transfer_prototype(
-            agent_feat, 'agent', 
-            few_shot_data.get('agent') if few_shot_data else None,
-            top_k, num_finetune_steps
-        )
-        
-        new_env_proto = self.pct_transfer.transfer_prototype(
-            env_feat, 'env',
-            few_shot_data.get('env') if few_shot_data else None,
-            top_k, num_finetune_steps
-        )
-        
-        T = self.agent_prototypes.shape[1]
-        new_agent_proto_expanded = new_agent_proto.unsqueeze(0).expand(T, -1).unsqueeze(0)
-        new_env_proto_expanded = new_env_proto.unsqueeze(0).expand(T, -1).unsqueeze(0)
-        
-        self.agent_prototypes = torch.cat([self.agent_prototypes, new_agent_proto_expanded], dim=0)
-        self.env_prototypes = torch.cat([self.env_prototypes, new_env_proto_expanded], dim=0)
-        
-        self.prototype_num += 1
-        
-        self.masks = self.init_masks()
-        
-        print(f"Adapted to new domain '{new_domain_name}'. Total prototypes: {self.prototype_num}")
-        
-        return new_agent_proto, new_env_proto
-
-    def get_drift_statistics(self):
-        """Get drift statistics from PDC calibrator."""
-        if self.pdc_calibrator is not None:
-            return self.pdc_calibrator.get_drift_statistics()
-        return None
 
     def freeze_trunk(self, num_layers: int = 0):
         """ freeze the trunk parameters in the last num_layers """
