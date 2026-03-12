@@ -254,6 +254,8 @@ class Policy(nn.Module):
 
         self.prototype_momentum = 0.9
         
+        self.register_buffer("global_step", torch.tensor(0, dtype=torch.long))
+        
         # MoLoRA layers for blocks.15.mlp.fc1 and blocks.15.mlp.fc2
         # Total combinations: N_a * N_e * N_t = 6 * 6 * 6 = 216
         self.num_combinations = self.prototype_num * self.prototype_num * self.num_task_protos
@@ -495,9 +497,20 @@ class Policy(nn.Module):
         agent_protos = self.agent_prototypes.clone()
         env_protos = self.env_prototypes.clone()
         
-        w_t = torch.softmax(torch.matmul(pooled_tokens, task_protos.T), dim=-1)
-        w_a = torch.softmax(torch.matmul(pooled_tokens, agent_protos.T), dim=-1)
-        w_e = torch.softmax(torch.matmul(pooled_tokens, env_protos.T), dim=-1)
+        if self.training:
+            self.global_step += 1
+        
+        progress = min(1.0, self.global_step.item() / 20000.0)
+        tau = 1.0 - 0.9 * progress
+        
+        pooled_tokens_norm = F.normalize(pooled_tokens, p=2, dim=-1)
+        task_protos_norm = F.normalize(task_protos, p=2, dim=-1)
+        agent_protos_norm = F.normalize(agent_protos, p=2, dim=-1)
+        env_protos_norm = F.normalize(env_protos, p=2, dim=-1)
+        
+        w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+        w_a = torch.softmax(torch.matmul(pooled_tokens_norm, agent_protos_norm.T) / tau, dim=-1)
+        w_e = torch.softmax(torch.matmul(pooled_tokens_norm, env_protos_norm.T) / tau, dim=-1)
         
         w_route = torch.einsum('bi, bj, bk -> bijk', w_a, w_e, w_t).reshape(B, -1)
         
