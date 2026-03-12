@@ -28,6 +28,10 @@ global_language_model = None  # to be assigned
 global_vision_processor = None # to be assigned
 global_language_processor = None # to be assigned
 
+# T5 specific global cache (to avoid conflicts with CLIP)
+global_t5_model = None
+global_t5_processor = None
+
 
 def mkdir_if_missing(dst_dir):
     if not os.path.exists(dst_dir):
@@ -373,13 +377,14 @@ def get_clip_embeddings(image, language="", device="cuda", max_length=77, image_
 @torch.no_grad()
 def get_t5_embeddings(language, per_token=True, max_length=16, device="cpu"):
     """Get T5 embedding"""
-    global global_language_model, global_language_processor
-    if global_language_model is None:
-        global_language_model = T5Model.from_pretrained("t5-base").to(device)
-        global_language_processor = T5Tokenizer.from_pretrained("t5-base")
+    global global_t5_model, global_t5_processor
+    
+    if global_t5_model is None:
+        global_t5_model = T5Model.from_pretrained("t5-base").to(device)
+        global_t5_processor = T5Tokenizer.from_pretrained("t5-base")
 
     # forward pass through encoder only
-    enc = global_language_processor(
+    enc = global_t5_processor(
         [language],
         return_tensors="pt",
         padding="max_length",
@@ -387,7 +392,7 @@ def get_t5_embeddings(language, per_token=True, max_length=16, device="cpu"):
         max_length=max_length,
     ).to(device)
 
-    output = global_language_model.encoder(
+    output = global_t5_model.encoder(
         input_ids=enc["input_ids"], attention_mask=enc["attention_mask"], return_dict=True
     )
     torch.cuda.empty_cache()

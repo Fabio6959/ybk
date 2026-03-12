@@ -12,8 +12,8 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from ..utils.normalizer import LinearNormalizer
-from ..models.transformer import MultiheadAttention, SimpleTransformer
+from hpt.utils.normalizer import LinearNormalizer
+from hpt.models.transformer import MultiheadAttention, SimpleTransformer
 from typing import List
 import numpy as np
 import einops
@@ -22,7 +22,7 @@ from sklearn.cluster import KMeans
 import torch.nn.functional as F
 
 
-from ..utils.utils import (
+from hpt.utils.utils import (
     dict_apply,
     get_sinusoid_encoding_table,
     EinOpsRearrange,
@@ -31,10 +31,189 @@ from ..utils.utils import (
     get_t5_embeddings,
 )
 
-from .prototype_calibration import PrototypeDynamicCalibrator
-from .prototype_transfer import PrototypeCrossDomainTransfer
+from hpt.models.prototype_calibration import PrototypeDynamicCalibrator
+from hpt.models.prototype_transfer import PrototypeCrossDomainTransfer
 
 STD_SCALE = 0.02
+
+
+def compute_ortho_loss(prototypes: torch.Tensor) -> torch.Tensor:
+    """
+    Compute orthogonal loss for prototypes to prevent mode collapse.
+    
+    Args:
+        prototypes: [num_protos, embed_dim] or [num_protos, T, embed_dim]
+    
+    Returns:
+        loss: orthogonal regularization loss
+    """
+    if prototypes.dim() == 3:
+        # [num_protos, T, embed_dim] -> [num_protos, T*embed_dim]
+        prototypes_flat = prototypes.view(prototypes.shape[0], -1)
+    else:
+        prototypes_flat = prototypes
+    
+    # L2 normalize each prototype
+    prototypes_norm = F.normalize(prototypes_flat, p=2, dim=-1)  # [num_protos, dim]
+    
+    # Compute similarity matrix [num_protos, num_protos]
+    sim_matrix = torch.matmul(prototypes_norm, prototypes_norm.T)  # [num_protos, num_protos]
+    
+    # Identity matrix
+    identity = torch.eye(sim_matrix.size(0), device=sim_matrix.device)
+    
+    # Frobenius norm squared
+    loss = F.mse_loss(sim_matrix, identity, reduction='sum')
+    
+    return loss
+
+
+class TaskEncoder(nn.Module):
+    """
+    Task Encoder for encoding task intentions into task prototypes.
+    Uses learnable task prototypes with orthogonal regularization.
+    """
+    def __init__(self, text_dim: int = 512, embed_dim: int = 1024, num_task_protos: int = 6):
+        super().__init__()
+        self.text_dim = text_dim
+        self.embed_dim = embed_dim
+        self.num_task_protos = num_task_protos
+        
+        # MLP to project text features to embedding space
+        self.text_proj = nn.Sequential(
+            nn.Linear(text_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim)
+        )
+        
+        # Semantic projection layer for prototype features
+        # Input: embed_dim (1024), Output: 512
+        self.semantic_proj = nn.Linear(embed_dim, 512)
+        
+        # Task prototypes as learnable parameters (端到端学习)
+        # Shape: [num_task_protos, embed_dim] = [6, 1024]
+        self.task_prototypes = nn.Parameter(torch.randn(num_task_protos, embed_dim) * 0.02)
+    
+    def forward(self, text_features: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            text_features: [B, text_dim] or [B, T, text_dim] text embeddings
+        
+        Returns:
+            w_t: [B, N_t] routing weights for task prototypes
+        """
+        if text_features.dim() == 3:
+            text_features = text_features.mean(dim=1)
+        
+        # Project to embedding space
+        text_embed = self.text_proj(text_features)  # [B, embed_dim]
+        
+        # Compute similarity with task prototypes
+        # Normalize for cosine similarity
+        text_embed_norm = F.normalize(text_embed, p=2, dim=-1)  # [B, embed_dim]
+        task_prototypes_norm = F.normalize(self.task_prototypes, p=2, dim=-1)  # [N_t, embed_dim]
+        
+        # Compute similarity scores
+        sim_scores = torch.matmul(text_embed_norm, task_prototypes_norm.T)  # [B, N_t]
+        
+        # Softmax to get routing weights
+        w_t = torch.softmax(sim_scores, dim=-1)  # [B, N_t]
+        
+        return w_t
+    
+    def compute_ortho_loss(self) -> torch.Tensor:
+        """
+        Compute orthogonal loss for task prototypes to prevent mode collapse.
+        """
+        task_prototypes_norm = F.normalize(self.task_prototypes, p=2, dim=-1)  # [N_t, embed_dim]
+        sim_matrix = torch.matmul(task_prototypes_norm, task_prototypes_norm.T)  # [N_t, N_t]
+        identity = torch.eye(self.num_task_protos, device=sim_matrix.device)
+        loss = F.mse_loss(sim_matrix, identity, reduction='sum')
+        return loss
+
+
+class MoLoRALayer(nn.Module):
+    """
+    Mixture of LoRAs (MoLoRA) for efficient fine-tuning.
+    Replaces nn.Linear layers with low-rank adapters weighted by routing scores.
+    """
+    def __init__(self, in_features: int, out_features: int, num_combinations: int, r: int = 64):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_combinations = num_combinations
+        self.r = r
+        
+        # LoRA matrices: [num_combinations, in_features, r]
+        self.lora_A = nn.Parameter(torch.randn(num_combinations, in_features, r) * 0.02)
+        # LoRA matrices: [num_combinations, r, out_features]
+        self.lora_B = nn.Parameter(torch.randn(num_combinations, r, out_features) * 0.02)
+        
+        # Initialize as identity for small initial effect
+        with torch.no_grad():
+            self.lora_B[:, :, :] = 0
+        
+        # Cache for routing weights (set externally by Policy)
+        self._current_w_route = None
+        
+        # Base layer weight and bias (will be set by _replace_linear_layer)
+        self.weight = None
+        self.bias = None
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass with soft routing.
+        Uses weight blending approach: first blend LoRA weights, then apply to input.
+        
+        Args:
+            x: [B, in_features] or [B, T, in_features] input tensor
+        
+        Returns:
+            y: [B, out_features] or [B, T, out_features] output tensor
+        """
+        # 1. 获取缓存的路由权重
+        w = getattr(self, "_current_w_route", None)
+        B_x = x.shape[0]  # 当前实际流入的数据 Batch Size
+        
+        if w is None:
+            N = self.lora_A.shape[0]
+            w = torch.ones(B_x, N, device=x.device, dtype=x.dtype) / N
+        else:
+            # 关键修复：确保 w 的 batch size 与 x 对齐！
+            B_w = w.shape[0]
+            if B_w != B_x:
+                # 如果缓存的 w 比当前数据大，说明数据被截断了，我们切片取前 B_x 个
+                # （这在 HPT/MoDP 的特征分流/重构过程中非常常见）
+                if B_w > B_x:
+                    w = w[:B_x, :]
+                # 如果意外出现了 w 比 x 小的情况，做 padding 或 repeat 兜底
+                else:
+                    repeats = (B_x + B_w - 1) // B_w
+                    w = w.repeat(repeats, 1)[:B_x, :]
+
+        # 2. 动态加权融合该 Batch 的 LoRA 专家矩阵
+        # w shape: [B_x, N_total]
+        blended_A = torch.einsum('bn, nir -> bir', w, self.lora_A)
+        blended_B = torch.einsum('bn, nro -> bro', w, self.lora_B)
+
+        # 3. 计算 LoRA 输出
+        if x.dim() == 3:
+            lora_mid = torch.einsum('bti, bir -> btr', x, blended_A)
+            lora_out = torch.einsum('btr, bro -> bto', lora_mid, blended_B)
+        elif x.dim() == 2:
+            lora_mid = torch.einsum('bi, bir -> br', x, blended_A)
+            lora_out = torch.einsum('br, bro -> bo', lora_mid, blended_B)
+        else:
+            raise ValueError(f"Expected 2D or 3D input, got {x.dim()}D")
+
+        # 4. 计算 Base 层的输出并相加
+        if self.weight is not None:
+            base_out = F.linear(x, self.weight, self.bias)
+            return base_out + lora_out
+        else:
+            # If no base layer (standalone MoLoRA), return only LoRA output
+            return lora_out
+
 
 class Policy(nn.Module):
     """The HPT Policy class.
@@ -80,9 +259,11 @@ class Policy(nn.Module):
         self.modalities_tokens = {}
         self.action_tokens = {}
 
-        # agent/env prototype 
+        # agent/env/task prototype 
         self.prototype_num = 6
         self.prototype_dim = 64
+        self.num_task_protos = 6
+        self.lora_r = 64  # LoRA rank
 
         # self.agent_head = nn.Linear(32 * embed_dim, embed_dim)
         self.agent_head = nn.Sequential(
@@ -96,10 +277,28 @@ class Policy(nn.Module):
             nn.ReLU(),
             nn.Linear(32, self.prototype_dim)
         )
+        
+        # Task encoder for task intentions
+        self.text_dim = 512  # Default text embedding dimension
+        self.task_head = nn.Sequential(
+            nn.Linear(embed_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, self.prototype_dim)
+        )
+        
+        # Task encoder for processing text features
+        self.task_encoder = TaskEncoder(
+            text_dim=self.text_dim,
+            embed_dim=embed_dim,
+            num_task_protos=self.num_task_protos
+        )
+        
+        # Task prototypes as learnable parameters (端到端学习)
+        self.task_prototypes = nn.Parameter(torch.randn(self.num_task_protos, 32, self.prototype_dim) * 0.02)
 
         # self.decoder = nn.Linear(2 * embed_dim, embed_dim)
         self.decoder = nn.Sequential(
-            nn.Linear(2 * self.prototype_dim, embed_dim)
+            nn.Linear(3 * self.prototype_dim, embed_dim)
         )
 
         # self.agent_prototypes = None  # shape: (num_proto, D)
@@ -108,12 +307,21 @@ class Policy(nn.Module):
         self.register_buffer("env_prototypes", torch.zeros(self.prototype_num, 32, self.prototype_dim))
 
         self.prototype_momentum = 0.9
-        # policy prototypes
-        self.masks = self.init_masks()
-        self.top_k_masks = 2
+        
+        # MoLoRA layers for blocks.15.mlp.fc1 and blocks.15.mlp.fc2
+        # Total combinations: N_a * N_e * N_t = 6 * 6 * 6 = 216
+        self.num_combinations = self.prototype_num * self.prototype_num * self.num_task_protos
+        self.molora_layers = nn.ModuleDict()
+        self._init_molora_layers()
+        
+        # Store references to original layers for replacement
+        self.original_fc1 = None
+        self.original_fc2 = None
+        
+        # Routing weights storage
         self.current_w_a = None
         self.current_w_e = None
-        self._register_mask_update_hook()
+        self.current_w_t = None
 
         # DyCoP: Prototype Dynamic Calibrator (PDC)
         self.pdc_calibrator = PrototypeDynamicCalibrator(
@@ -126,33 +334,89 @@ class Policy(nn.Module):
         self.pct_transfer = None  # Will be initialized with source prototypes
 
 
-    def _register_mask_update_hook(self):
-        def backward_hook(module, grad_input, grad_output):
-            if self.current_w_a is not None and self.current_w_e is not None:
-                self.update_masks_with_weights(self.current_w_a, self.current_w_e)
-                self.current_w_a = None
-                self.current_w_e = None
+    def _init_molora_layers(self):
+        """Initialize MoLoRA layers and directly replace target layers in trunk."""
+        # Get dimensions from trunk and replace layers
+        for name, module in self.trunk["trunk"].named_modules():
+            if isinstance(module, nn.Linear):
+                if "blocks.15.mlp.fc1" in name:
+                    in_features = module.in_features
+                    out_features = module.out_features
+                    
+                    # Create MoLoRA layer
+                    molora_fc1 = MoLoRALayer(
+                        in_features=in_features,
+                        out_features=out_features,
+                        num_combinations=self.num_combinations,
+                        r=self.lora_r
+                    )
+                    
+                    # Directly replace the original layer
+                    self._replace_linear_layer(module, molora_fc1, name)
+                    
+                    # Store reference for routing weight assignment
+                    self.molora_layers["fc1"] = molora_fc1
+                    break
         
         for name, module in self.trunk["trunk"].named_modules():
             if isinstance(module, nn.Linear):
-                if "blocks.15.mlp.fc2" in name: 
-                    module.register_full_backward_hook(backward_hook)
-
-    def init_masks(self):
-        """Initialize policy prototypes (masks) for prototype pairs (agent-environment)."""
-        masks_dict = {}
-        for a in range(self.prototype_num):
-            for e in range(self.prototype_num):
-                masks = []
-                for name, module in self.trunk["trunk"].named_modules():
-                    if isinstance(module, nn.Linear):
-                        if "blocks.15.mlp.fc2" in name:
-                            mask = torch.ones_like(module.weight)
-                            masks.append(mask)
-                masks_dict[f"{a}_{e}"] = masks
-        return masks_dict
-
-
+                if "blocks.15.mlp.fc2" in name:
+                    in_features = module.in_features
+                    out_features = module.out_features
+                    
+                    # Create MoLoRA layer
+                    molora_fc2 = MoLoRALayer(
+                        in_features=in_features,
+                        out_features=out_features,
+                        num_combinations=self.num_combinations,
+                        r=self.lora_r
+                    )
+                    
+                    # Directly replace the original layer
+                    self._replace_linear_layer(module, molora_fc2, name)
+                    
+                    # Store reference for routing weight assignment
+                    self.molora_layers["fc2"] = molora_fc2
+                    break
+        
+        # Freeze trunk parameters (excluding MoLoRA layers)
+        self._freeze_trunk_parameters()
+    
+    def _replace_linear_layer(self, original_layer: nn.Linear, new_layer: nn.Module, layer_name: str):
+        """
+        Replace a nn.Linear layer with a new layer (MoLoRA).
+        This modifies the module in-place to avoid breaking the module tree.
+        """
+        # Copy all attributes from original to new layer
+        for attr_name, attr_value in original_layer.__dict__.items():
+            if not attr_name.startswith('_'):
+                setattr(new_layer, attr_name, attr_value)
+        
+        # Find parent module and replace
+        parent = None
+        child_name = None
+        for parent_name, parent_module in self.trunk["trunk"].named_modules():
+            if parent_module == original_layer:
+                continue
+            for child_name_candidate, child_module in parent_module.named_children():
+                if child_module is original_layer:
+                    parent = parent_module
+                    child_name = child_name_candidate
+                    break
+            if parent is not None:
+                break
+        
+        if parent is not None and child_name is not None:
+            setattr(parent, child_name, new_layer)
+            print(f"Replaced layer '{layer_name}' with MoLoRA layer")
+        else:
+            print(f"Warning: Could not replace layer '{layer_name}'")
+    
+    def _freeze_trunk_parameters(self):
+        """Freeze all trunk parameters for MoLoRA fine-tuning."""
+        for param in self.trunk.parameters():
+            param.requires_grad = False
+    
     def init_encoders(self, modality, encoder):
         """
         Add image/language encoders into the policy parameters in the case of joint finetuning
@@ -281,18 +545,36 @@ class Policy(nn.Module):
                                     masks[mask_idx] = (1 - importance) * masks[mask_idx] + importance * new_mask
                                 mask_idx += 1
     
-    def feature2proto(self, tokens: torch.Tensor) -> torch.Tensor:
+    def feature2proto(self, tokens: torch.Tensor, text_features: torch.Tensor = None) -> torch.Tensor:
         B, T, _ = tokens.shape
         P = self.prototype_num
         D = self.prototype_dim
-        # print('gogogogogogogogoggogo~~~~~0```~`~~`~', tokens.shape)
+        
+        # Agent encoding
         f_a = self.agent_head(tokens)
+        
+        # Env encoding
         f_e = self.env_head(tokens)
-        # print('gogogogogogogogoggogo~~~~~1```~`~~`~', f_a.shape, f_e.shape)     # 1024, 32, 128
-        if self.agent_prototypes is None:
+        
+        # Task encoding (if text features provided)
+        if text_features is not None and hasattr(self, 'task_encoder'):
+            # Use TaskEncoder to get task routing weights
+            w_t = self.task_encoder(text_features)  # [B, N_t]
+            # Project to prototype space
+            f_t = self.task_head(tokens)  # [B, T, D]
+        else:
+            # Fallback: use task_head on tokens if no text features
+            f_t = self.task_head(tokens)
+            # Compute routing weights from task prototypes
+            proto_t_flat = self.task_prototypes.view(self.num_task_protos, -1)
+            f_t_flat = f_t.view(B, -1)
+            w_t = torch.softmax(torch.matmul(f_t_flat, proto_t_flat.T), dim=-1)  # [B, N_t]
+        
+        # Initialize prototypes if not exists
+        if torch.all(self.agent_prototypes == 0):
             self.agent_prototypes = self._init_prototypes(f_a, self.prototype_num)
             self.env_prototypes = self._init_prototypes(f_e, self.prototype_num)
-            # print('gogogogogogogogoggogo~~~~~2```~`~~`~', self.agent_prototypes.shape, self.env_prototypes.shape)
+            # Don't reinitialize task_prototypes as they're already nn.Parameter
 
         # DyCoP: Apply Prototype Dynamic Calibration (PDC)
         if self.pdc_calibrator is not None and self.training:
@@ -305,26 +587,44 @@ class Policy(nn.Module):
             self.agent_prototypes = calibrated_agent.detach()
             self.env_prototypes = calibrated_env.detach()
 
+        # Compute routing weights for each prototype type
         f_a_flat = f_a.view(B, -1)  # [B, T*D]
         f_e_flat = f_e.view(B, -1)
+        
         proto_a_flat = self.agent_prototypes.view(P, -1)  # [P, T*D]
         proto_e_flat = self.env_prototypes.view(P, -1)
-        w_a = torch.softmax(torch.matmul(f_a_flat, proto_a_flat.T), dim=-1)
+        
+        w_a = torch.softmax(torch.matmul(f_a_flat, proto_a_flat.T), dim=-1)  # [B, P]
+        w_e = torch.softmax(torch.matmul(f_e_flat, proto_e_flat.T), dim=-1)  # [B, P]
+        
+        # 3D tensor product for routing weights
+        # w_route: [B, N_a * N_e * N_t]
+        w_route = torch.einsum('bi, bj, bk -> bijk', w_a, w_e, w_t).reshape(B, -1)
+        
+        # Compute prototype features
         p_a = torch.matmul(w_a, proto_a_flat).view(B, T, D)  # [B, T, D]
-        w_e = torch.softmax(torch.matmul(f_e_flat, proto_e_flat.T), dim=-1)
         p_e = torch.matmul(w_e, proto_e_flat).view(B, T, D)  # [B, T, D]
-        # print('gogogogogogogogoggogo~~~~~3```~`~~`~', p_a.shape, p_e.shape, w_a.shape, w_e.shape)
+        
+        # Compute task prototype features
+        proto_t_flat = self.task_prototypes.view(self.num_task_protos, -1)
+        p_t = torch.matmul(w_t, proto_t_flat).view(B, T, D)  # [B, T, D]
+        
+        # Store routing weights for MoLoRA
         self.current_w_a = w_a.detach()
         self.current_w_e = w_e.detach()
-        trunk_tokens_rec = self.decoder(torch.cat([p_a, p_e], dim=-1))  # [B, T, D]
-        # print('gogogogogogogogoggogo~~~~~4```~`~~`~', trunk_tokens_rec.shape)
+        self.current_w_t = w_t.detach()
+        
+        # Decode with 3 prototypes
+        trunk_tokens_rec = self.decoder(torch.cat([p_a, p_e, p_t], dim=-1))  # [B, T, D]
+        
+        # Update prototypes with momentum (only agent and env, task prototypes are learnable)
         self.agent_prototypes = self._update_prototypes(self.agent_prototypes, f_a.detach(), w_a.detach())
         self.env_prototypes = self._update_prototypes(self.env_prototypes, f_e.detach(), w_e.detach())
-        # print('gogogogogogogogoggogo~~~~~5```~`~~`~', self.agent_prototypes.shape, self.env_prototypes.shape)
-        # print('gogogogogogogogoggogo~~~~~final```~`~~`~', trunk_tokens_rec.shape, tokens.shape)
-        return trunk_tokens_rec
+        # Task prototypes are learnable nn.Parameter, don't update with momentum
+        
+        return trunk_tokens_rec, w_route
 
-    def preprocess_tokens(self, domain: str, features: List[torch.Tensor]) -> torch.Tensor:
+    def preprocess_tokens(self, domain: str, features: List[torch.Tensor], text_features: torch.Tensor = None) -> torch.Tensor:
         """
         Shared modality layers and add modality tokens. Add positional and time embeddings.
         """
@@ -334,17 +634,32 @@ class Policy(nn.Module):
             tokens = torch.cat([tokens, action_tokens], dim=-2)
         
         ori_tokens = tokens
-        proto_tokens = self.feature2proto(tokens)
+        proto_tokens, w_route = self.feature2proto(tokens, text_features)
         position_tokens = self.get_position_embedding(proto_tokens, self.embed_dim)
         tokens = tokens + position_tokens
         # proto_tokens = self.feature2proto(tokens)
-        return tokens, ori_tokens, proto_tokens
+        return tokens, ori_tokens, proto_tokens, w_route
     
     def _init_prototypes(self, features: torch.Tensor, num_proto: int):
         B, T, D = features.shape
         features_flat = features.view(B, -1).detach().cpu().numpy()  # [B, T*D]
-        kmeans = KMeans(n_clusters=num_proto, random_state=0, n_init='auto').fit(features_flat)
-        centers = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32).view(num_proto, T, D)
+        
+        # Use KMeans if we have enough samples, otherwise use random initialization
+        if B >= num_proto:
+            kmeans = KMeans(n_clusters=num_proto, random_state=0, n_init='auto').fit(features_flat)
+            centers = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32).view(num_proto, T, D)
+        else:
+            # Not enough samples for KMeans, use random initialization
+            # Sample from the available features
+            if B > 0:
+                # Randomly sample from available features
+                indices = torch.randperm(B * T)[:num_proto]
+                sampled_features = features_flat[indices]
+                centers = sampled_features.view(num_proto, T, D)
+            else:
+                # No features available, use random initialization
+                centers = torch.randn(num_proto, T, D) * 0.02
+        
         return centers.to(features.device)
 
     def _update_prototypes(self, prototypes, features, weights):
@@ -395,7 +710,10 @@ class Policy(nn.Module):
         """
         Pre-process proprioception-related inputs, e.g. normalizing states
         """
-        if self.stem_spec.normalize_state and "state" in data:
+        # Check if stem_spec exists and has normalize_state attribute
+        normalize_state = getattr(self.stem_spec, 'normalize_state', False) if hasattr(self, 'stem_spec') else False
+        
+        if normalize_state and "state" in data:
             data["state"] = self.normalizer[domain]["state"].normalize(data["state"])
 
         if "prev_actions" in data:
@@ -419,8 +737,15 @@ class Policy(nn.Module):
             data: dictionary of tensors of different modalities
         """
         feats = []
-        for modality in self.modalities:
-            stem = self.stems[domain + "_" + modality]
+        # Check if modalities exists, otherwise use data keys
+        modalities = self.modalities if hasattr(self, 'modalities') else list(data.keys())
+        
+        for modality in modalities:
+            stem_key = domain + "_" + modality
+            if stem_key not in self.stems:
+                continue
+            
+            stem = self.stems[stem_key]
 
             if modality not in data:
                 continue
@@ -434,7 +759,10 @@ class Policy(nn.Module):
             data_horizon = data_shape[1]
             horizon = data_horizon
 
-            if self.train_mode and self.stem_spec.random_horizon_masking and data_horizon > 1:
+            # Check if stem_spec exists and has random_horizon_masking
+            random_horizon_masking = getattr(self.stem_spec, 'random_horizon_masking', False) if hasattr(self, 'stem_spec') else False
+            
+            if self.train_mode and random_horizon_masking and data_horizon > 1:
                 horizon = np.random.randint(1, data_horizon + 1)
                 data[modality] = data[modality][:, data_horizon - horizon : data_horizon]
 
@@ -449,57 +777,7 @@ class Policy(nn.Module):
 
         return feats
     
-
-    def forward_with_masks(self, tokens, w_a, w_e):
-        device = tokens.device
-        w_a_mean = w_a.mean(dim=0)  # [P]
-        w_e_mean = w_e.mean(dim=0)  # [P]
-        proto_pairs = []
-        for a_idx in range(self.prototype_num):
-            for e_idx in range(self.prototype_num):
-                importance = w_a_mean[a_idx] * w_e_mean[e_idx]
-                if importance > 0.01:
-                    proto_pairs.append((a_idx, e_idx, importance))
-
-        proto_pairs.sort(key=lambda x: x[2], reverse=True)
-        top_k = min(len(proto_pairs), self.top_k_masks)
-        selected_pairs = proto_pairs[:top_k]
-
-        transformer_outputs = []
-        weights = []
-
-        for a_idx, e_idx, importance in selected_pairs:
-            mask_key = f"{a_idx}_{e_idx}"
-            masks = self.masks[mask_key]
-
-            original_weights = {}
-            mask_idx = 0
-            
-            for name, module in self.trunk["trunk"].named_modules():
-                if isinstance(module, nn.Linear) and "blocks.15.mlp.fc2" in name:
-                    if mask_idx < len(masks):
-                        mask = masks[mask_idx].to(device)
-                        original_weights[name] = module.weight.data.clone()
-                        module.weight.data = module.weight.data * mask
-                        mask_idx += 1
-
-            current_output = self.trunk["trunk"](tokens)
-            transformer_outputs.append(current_output)
-            weights.append(importance)
-            
-            mask_idx = 0
-            for name, module in self.trunk["trunk"].named_modules():
-                if isinstance(module, nn.Linear) and "blocks.15.mlp.fc2" in name:
-                    if mask_idx < len(masks):
-                        module.weight.data = original_weights[name]
-                        mask_idx += 1
-        
-        weights = torch.tensor(weights, device=device)
-        weights = weights / weights.sum()
-        final_output = sum(out * w for out, w in zip(transformer_outputs, weights))
-        return final_output
-
-    def forward_features(self, domain: str, data: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, domain: str, data: torch.Tensor, text_features: torch.Tensor = None) -> torch.Tensor:
         """
         Compute the features for the given domain and data.
         Args:
@@ -512,33 +790,28 @@ class Policy(nn.Module):
         self.stem_tokens = self.stem_process(domain, data)
 
         # combine tokens
-        self.trunk_tokens, ori_tokens, proto_tokens = self.preprocess_tokens(domain, self.stem_tokens)
+        self.trunk_tokens, ori_tokens, proto_tokens, w_route = self.preprocess_tokens(domain, self.stem_tokens)
 
-        # # trunk pass
-        # if not self.no_trunk:
-        #     self.trunk_tokens = self.trunk["trunk"](self.trunk_tokens)
-
-        # trunk pass with masks
+        # trunk pass with MoLoRA
         if not self.no_trunk:
-            if hasattr(self, 'current_w_a') and hasattr(self, 'current_w_e'):
-                self.trunk_tokens = self.forward_with_masks(
-                    self.trunk_tokens, 
-                    self.current_w_a,
-                    self.current_w_e
-                )
+            # Set routing weights for MoLoRA layers before trunk forward
+            if w_route is not None and "fc1" in self.molora_layers and "fc2" in self.molora_layers:
+                self.molora_layers["fc1"]._current_w_route = w_route
+                self.molora_layers["fc2"]._current_w_route = w_route
+                self.trunk_tokens = self.trunk["trunk"](self.trunk_tokens)
             else:
                 print('-------------------..........use original transformer')
                 self.trunk_tokens = self.trunk["trunk"](self.trunk_tokens)
 
         # pooling the features
-        return self.postprocess_tokens(self.trunk_tokens), ori_tokens, proto_tokens
+        return self.postprocess_tokens(self.trunk_tokens), ori_tokens, proto_tokens, w_route
 
     def compute_loss(self, batch):
         """Compute the loss for the training loop forward pass.
         """
         self.train_mode = True
         domain, data = batch["domain"][0], batch["data"]
-        features, ori_tokens, proto_tokens = self.forward_features(domain, data)
+        features, ori_tokens, proto_tokens, w_route = self.forward_features(domain, data)
 
         # normalize the labels
         if domain in self.normalizer:
@@ -546,18 +819,35 @@ class Policy(nn.Module):
 
         # head pass
         loss = self.heads[domain].compute_loss(features, data)
+        
+        # Reconstruction loss
         loss += F.mse_loss(ori_tokens, proto_tokens)
+        
+        # Orthogonal loss for all prototype types
+        if self.agent_prototypes is not None and len(self.agent_prototypes) > 0:
+            loss_ortho_agent = compute_ortho_loss(self.agent_prototypes)
+            loss += 0.01 * loss_ortho_agent  # Weight for agent prototypes
+        
+        if self.env_prototypes is not None and len(self.env_prototypes) > 0:
+            loss_ortho_env = compute_ortho_loss(self.env_prototypes)
+            loss += 0.01 * loss_ortho_env  # Weight for env prototypes
+        
+        if hasattr(self, 'task_prototypes') and self.task_prototypes is not None and len(self.task_prototypes) > 0:
+            loss_ortho_task = compute_ortho_loss(self.task_prototypes)
+            loss += 0.01 * loss_ortho_task  # Weight for task prototypes
+        
         return loss
 
-    def forward(self, domain: str, data: dict):
+    def forward(self, domain: str, data: dict, text_features: torch.Tensor = None):
         """
         Performs a forward pass of the model.
         Args:
-            batch: Dictionary of domain and data, where the data dictionary
-            contains the observations (vision, proprioception, etc).
+            domain: The domain of the data.
+            data: Dictionary of observations (vision, proprioception, etc).
+            text_features: Optional text embeddings for task encoding.
         """
         # pooling the features
-        features, _, _ = self.forward_features(domain, data)
+        features, _, _, _ = self.forward_features(domain, data, text_features)
 
         # head pass
         action = self.heads[domain](features)
