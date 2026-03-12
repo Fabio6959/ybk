@@ -568,6 +568,7 @@ class Policy(nn.Module):
         proto_update = torch.matmul(norm_weights.T, pooled_features)
         
         updated = self.prototype_momentum * prototypes + (1 - self.prototype_momentum) * proto_update
+        updated = F.normalize(updated, p=2, dim=-1)
         return updated
 
 
