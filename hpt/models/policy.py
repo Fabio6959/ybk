@@ -742,9 +742,19 @@ class Policy(nn.Module):
             loss_ortho_env = compute_ortho_loss(self.env_prototypes)
             loss += 0.01 * loss_ortho_env  # Weight for env prototypes
         
-        # 计算并加上大模型语义对齐损失 (权重设为 0.1)
-        semantic_loss = self.calc_semantic_loss()
-        loss = loss + 0.1 * semantic_loss
+        # 计算大模型语义对齐损失
+        semantic_loss_raw = self.calc_semantic_loss()
+        
+        # 动态计算语义损失权重 (Linear Annealing)
+        anneal_steps = 20000.0
+        if hasattr(self, 'global_step'):
+            progress = torch.clamp(self.global_step / anneal_steps, min=0.0, max=1.0)
+            semantic_weight = 0.1 * (1.0 - progress.item())
+        else:
+            semantic_weight = 0.01
+            
+        # 将退火后的语义损失加入总 Loss
+        loss = loss + semantic_weight * semantic_loss_raw
         
         return loss
     
