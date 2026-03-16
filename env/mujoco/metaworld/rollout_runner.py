@@ -293,8 +293,10 @@ def generate_dataset_rollouts(
         dataset_traj_actions = []
         dataset_traj_images = []
         total_transition_num = 0
+        successful_episodes = 0
+        total_attempts = 0
 
-        for i in range(cycles):
+        while successful_episodes < cycles:
             eps_reward = 0
             traj_length = 0
             eps_states = []
@@ -315,7 +317,7 @@ def generate_dataset_rollouts(
                         cv2.imshow("img", img)
                         cv2.waitKey(1)
                     
-                    if save_video and i <= 10:
+                    if save_video and successful_episodes <= 10:
                         writer.write(img)
 
                     if info["success"]:
@@ -324,15 +326,21 @@ def generate_dataset_rollouts(
                     step += 1
             except:
                 print(traceback.format_exc())
+                total_attempts += 1
                 continue
 
-            print("success:", info["success"])
-            if info["success"]:
-                total_transition_num += len(eps_images)
-            else:
-                total_transition_num += len(eps_images)
+            total_attempts += 1
+            last_success = info.get("success", False)
+            print(f"Attempt {total_attempts}: success={last_success}, successful_episodes={successful_episodes}/{cycles}")
 
-            print(f"data generation number of episodes: {tag} {i} {total_transition_num}")
+            if not last_success:
+                print(f"Trajectory failed, retrying... ({successful_episodes}/{cycles})")
+                continue
+
+            total_transition_num += len(eps_images)
+            successful_episodes += 1
+
+            print(f"data generation number of episodes: {tag} successful={successful_episodes}/{cycles} total_attempts={total_attempts} transitions={total_transition_num}")
             steps = []
 
             eps_actions = eps_actions[1:]
