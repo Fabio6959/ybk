@@ -300,6 +300,7 @@ def generate_dataset_rollouts(
         total_transition_num = 0
         successful_episodes = 0
         total_attempts = 0
+        max_allowed_attempts = 100
 
         while successful_episodes < cycles:
             eps_reward = 0
@@ -335,11 +336,16 @@ def generate_dataset_rollouts(
                 continue
 
             total_attempts += 1
+            
+            if total_attempts >= max_allowed_attempts:
+                print(f"[FAILSAFE] Task '{tag}' exceeded max attempts ({max_allowed_attempts}). Skipping task.")
+                break
+
             last_success = info.get("success", False)
             print(f"Attempt {total_attempts}: success={last_success}, successful_episodes={successful_episodes}/{cycles}")
 
             if not last_success:
-                print(f"Trajectory failed, retrying... ({successful_episodes}/{cycles})")
+                print(f"Trajectory failed for '{tag}', retrying... ({successful_episodes}/{cycles})")
                 continue
 
             total_transition_num += len(eps_images)
