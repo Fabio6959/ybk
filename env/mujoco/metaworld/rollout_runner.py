@@ -19,56 +19,56 @@ import traceback
 import json
 
 ALL_TASK_CONFIG = [
-    ("assembly-v3", np.zeros(4), 10000, True, "pick up the pole and put the circle through the cylinder."),
-    ("basketball-v3", np.zeros(4), 10000, True, "pick up the basketball and drop it through the basket."),
-    ("bin-picking-v3", np.zeros(4), 10000, True, "move the block from one bin to another bin."),
-    ("box-close-v3", np.zeros(4), 10000, True, "close the lid of the box."),
-    ("button-press-topdown-v3", np.zeros(4), 10000, True, "press down the button."),
-    ("button-press-topdown-wall-v3", np.zeros(4), 10000, True, "press down the button with one finger."),
-    ("button-press-v3", np.zeros(4), 10000, True, "press in the button with one finger."),
-    ("button-press-wall-v3", np.zeros(4), 100, True, "move between wall and botton and open fingers."),
-    ("coffee-button-v3", np.zeros(4), 10000, True, "touch the coffee mug."),
-    ("coffee-pull-v3", np.zeros(4), 10000, True, "grasp the coffee mug."),
-    ("coffee-push-v3", np.zeros(4), 10000, True, "push the coffee mug."),
-    ("dial-turn-v3", np.zeros(4), 10000, True, "turn the dial with the fingers."),
-    ("disassemble-v3", np.zeros(4), 10000, True, "pull the circle bar out of the cylinder."),
-    ("door-close-v3", np.zeros(4), 10000, True, "close the door with the fingers."),
-    ("door-lock-v3", np.zeros(4), 10000, True, "lock the door."),
-    ("door-open-v3", np.zeros(4), 10000, True, "open the door."),
-    ("door-unlock-v3", np.zeros(4), 10000, True, "unlock the door."),
-    ("hand-insert-v3", np.zeros(4), 10000, True, "pick up the wooden block and put it in the box."),
-    ("drawer-close-v3", np.zeros(4), 10000, True, "close the drawer with the fingers."),
-    ("drawer-open-v3", np.zeros(4), 10000, True, "open the drawer with the fingers."),
-    ("faucet-open-v3", np.zeros(4), 10000, True, "turn the faucet to open."),
-    ("faucet-close-v3", np.zeros(4), 10000, True, "turn the faucet to close."),
-    ("hammer-v3", np.zeros(4), 10000, True, "grasp the hammer and move towards the button."),
-    ("handle-press-side-v3", np.zeros(4), 10000, True, "press the handle down."),
-    ("handle-press-v3", np.zeros(4), 10000, True, "use the side finger to press the handle."),
-    ("handle-pull-side-v3", np.zeros(4), 10000, True, "pull the handle"),
-    ("handle-pull-v3", np.zeros(4), 10000, True, "pull the handle."),
-    ("lever-pull-v3", np.zeros(4), 10000, True, "pull the lever."),
-    ("pick-place-wall-v3", np.zeros(4), 10000, True, "pick the red cylinder and place it at the blue spot."),
-    ("pick-out-of-hole-v3", np.zeros(4), 10000, True, "pick up the red cylinder."),
-    ("push-back-v3", np.zeros(4), 10000, True, "move the wooded brick to the green spot."),
-    ("push-v3", np.zeros(4), 10000, True, "push the red cylinder to the green spot."),
-    ("pick-place-v3", np.zeros(4), 10000, True, "pick up the red cylinder and put it in the blue spot."),
-    ("plate-slide-v3", np.zeros(4), 10000, True, "pick up the gray cylinder and move it to the red bucket."),
-    ("plate-slide-side-v3", np.zeros(4), 10000, True, "push the gray cylinder into the red bucket"),
-    ("plate-slide-back-v3", np.zeros(4), 10000, True, "move the gray cylinder out of the red bucket"),
-    ("plate-slide-back-side-v3", np.zeros(4), 10000, True, "pull the gray cylinder out of the red bucket"),
-    ("peg-insert-side-v3", np.zeros(4), 10000, True, "insert the green peg into the red wall."),
-    ("peg-unplug-side-v3", np.zeros(4), 10000, True, "unplug the gray cylinder out."),
-    ("soccer-v3", np.zeros(4), 10000, True, "push the soccer ball into the goal net."),
-    ("stick-push-v3", np.zeros(4), 10000, True, "pick up the blue box and push the gray."),
-    ("stick-pull-v3", np.zeros(4), 10000, True, "pick the blue box and pull the gray."),
-    ("push-wall-v3", np.zeros(4), 10000, True, "move the red cylinder around the wall to the green spot."),
-    ("reach-wall-v3", np.zeros(4), 10000, True, "reach the red spot on the wall."),
-    ("reach-v3", np.zeros(4), 10000, True, "reach the wall."),
-    ("shelf-place-v3", np.zeros(4), 10000, True, "put the blue block inside the shelf."),
-    ("sweep-into-v3", np.zeros(4), 10000, True, "pick up the wooden block and put inside the hole."),
-    ("sweep-v3", np.zeros(4), 10000, True, "pick the wooden block and then drop it."),
-    ("window-open-v3", np.zeros(4), 10000, True, "open the window by pushing the handle."),
-    ("window-close-v3", np.zeros(4), 10000, True, "close the window by pulling the handle."),
+    ("assembly-v3-goal-observable", np.zeros(4), 10000, True, "pick up the pole and put the circle through the cylinder."),
+    ("basketball-v3-goal-observable", np.zeros(4), 10000, True, "pick up the basketball and drop it through the basket."),
+    ("bin-picking-v3-goal-observable", np.zeros(4), 10000, True, "move the block from one bin to another bin."),
+    ("box-close-v3-goal-observable", np.zeros(4), 10000, True, "close the lid of the box."),
+    ("button-press-topdown-v3-goal-observable", np.zeros(4), 10000, True, "press down the button."),
+    ("button-press-topdown-wall-v3-goal-observable", np.zeros(4), 10000, True, "press down the button with one finger."),
+    ("button-press-v3-goal-observable", np.zeros(4), 10000, True, "press in the button with one finger."),
+    ("button-press-wall-v3-goal-observable", np.zeros(4), 100, True, "move between wall and botton and open fingers."),
+    ("coffee-button-v3-goal-observable", np.zeros(4), 10000, True, "touch the coffee mug."),
+    ("coffee-pull-v3-goal-observable", np.zeros(4), 10000, True, "grasp the coffee mug."),
+    ("coffee-push-v3-goal-observable", np.zeros(4), 10000, True, "push the coffee mug."),
+    ("dial-turn-v3-goal-observable", np.zeros(4), 10000, True, "turn the dial with the fingers."),
+    ("disassemble-v3-goal-observable", np.zeros(4), 10000, True, "pull the circle bar out of the cylinder."),
+    ("door-close-v3-goal-observable", np.zeros(4), 10000, True, "close the door with the fingers."),
+    ("door-lock-v3-goal-observable", np.zeros(4), 10000, True, "lock the door."),
+    ("door-open-v3-goal-observable", np.zeros(4), 10000, True, "open the door."),
+    ("door-unlock-v3-goal-observable", np.zeros(4), 10000, True, "unlock the door."),
+    ("hand-insert-v3-goal-observable", np.zeros(4), 10000, True, "pick up the wooden block and put it in the box."),
+    ("drawer-close-v3-goal-observable", np.zeros(4), 10000, True, "close the drawer with the fingers."),
+    ("drawer-open-v3-goal-observable", np.zeros(4), 10000, True, "open the drawer with the fingers."),
+    ("faucet-open-v3-goal-observable", np.zeros(4), 10000, True, "turn the faucet to open."),
+    ("faucet-close-v3-goal-observable", np.zeros(4), 10000, True, "turn the faucet to close."),
+    ("hammer-v3-goal-observable", np.zeros(4), 10000, True, "grasp the hammer and move towards the button."),
+    ("handle-press-side-v3-goal-observable", np.zeros(4), 10000, True, "press the handle down."),
+    ("handle-press-v3-goal-observable", np.zeros(4), 10000, True, "use the side finger to press the handle."),
+    ("handle-pull-side-v3-goal-observable", np.zeros(4), 10000, True, "pull the handle"),
+    ("handle-pull-v3-goal-observable", np.zeros(4), 10000, True, "pull the handle."),
+    ("lever-pull-v3-goal-observable", np.zeros(4), 10000, True, "pull the lever."),
+    ("pick-place-wall-v3-goal-observable", np.zeros(4), 10000, True, "pick the red cylinder and place it at the blue spot."),
+    ("pick-out-of-hole-v3-goal-observable", np.zeros(4), 10000, True, "pick up the red cylinder."),
+    ("push-back-v3-goal-observable", np.zeros(4), 10000, True, "move the wooded brick to the green spot."),
+    ("push-v3-goal-observable", np.zeros(4), 10000, True, "push the red cylinder to the green spot."),
+    ("pick-place-v3-goal-observable", np.zeros(4), 10000, True, "pick up the red cylinder and put it in the blue spot."),
+    ("plate-slide-v3-goal-observable", np.zeros(4), 10000, True, "pick up the gray cylinder and move it to the red bucket."),
+    ("plate-slide-side-v3-goal-observable", np.zeros(4), 10000, True, "push the gray cylinder into the red bucket"),
+    ("plate-slide-back-v3-goal-observable", np.zeros(4), 10000, True, "move the gray cylinder out of the red bucket"),
+    ("plate-slide-back-side-v3-goal-observable", np.zeros(4), 10000, True, "pull the gray cylinder out of the red bucket"),
+    ("peg-insert-side-v3-goal-observable", np.zeros(4), 10000, True, "insert the green peg into the red wall."),
+    ("peg-unplug-side-v3-goal-observable", np.zeros(4), 10000, True, "unplug the gray cylinder out."),
+    ("soccer-v3-goal-observable", np.zeros(4), 10000, True, "push the soccer ball into the goal net."),
+    ("stick-push-v3-goal-observable", np.zeros(4), 10000, True, "pick up the blue box and push the gray."),
+    ("stick-pull-v3-goal-observable", np.zeros(4), 10000, True, "pick the blue box and pull the gray."),
+    ("push-wall-v3-goal-observable", np.zeros(4), 10000, True, "move the red cylinder around the wall to the green spot."),
+    ("reach-wall-v3-goal-observable", np.zeros(4), 10000, True, "reach the red spot on the wall."),
+    ("reach-v3-goal-observable", np.zeros(4), 10000, True, "reach the wall."),
+    ("shelf-place-v3-goal-observable", np.zeros(4), 10000, True, "put the blue block inside the shelf."),
+    ("sweep-into-v3-goal-observable", np.zeros(4), 10000, True, "pick up the wooden block and put inside the hole."),
+    ("sweep-v3-goal-observable", np.zeros(4), 10000, True, "pick the wooden block and then drop it."),
+    ("window-open-v3-goal-observable", np.zeros(4), 10000, True, "open the window by pushing the handle."),
+    ("window-close-v3-goal-observable", np.zeros(4), 10000, True, "close the window by pulling the handle."),
 ]
 RESOLUTION = (128, 128)
 
@@ -105,6 +105,9 @@ def learner_trajectory_generator(env, policy, lang="", camera_name="view_1"):
     step_data = get_observation_dict(o, img)
     for _ in range(env.max_path_length):
         a = policy.get_action(step_data)
+        max_val = np.max(np.abs(a))
+        if max_val > 1.0:
+            a = a / max_val
         step_result = env.step(a)
         if len(step_result) == 5:
             o, r, terminated, truncated, info = step_result
@@ -241,7 +244,9 @@ def expert_trajectory_generator(env, policy, camera_name="view_1"):
         o = reset_result
     for _ in range(env.max_path_length):
         a = policy.get_action(o)
-        a = np.clip(a, env.action_space.low, env.action_space.high)
+        max_val = np.max(np.abs(a))
+        if max_val > 1.0:
+            a = a / max_val
         step_result = env.step(a)
         if len(step_result) == 5:
             o, r, terminated, truncated, info = step_result

@@ -72,7 +72,9 @@ def test_gui():
             while step < max_steps:
                 # 获取动作
                 a = policy.get_action(o)
-                a = np.clip(a, env.action_space.low, env.action_space.high)
+                max_val = np.max(np.abs(a))
+                if max_val > 1.0:
+                    a = a / max_val
                 
                 # 执行动作
                 step_result = env.step(a)
