@@ -98,11 +98,7 @@ class MoLoRALayer(nn.Module):
         # LoRA matrices: [num_combinations, in_features, r]
         self.lora_A = nn.Parameter(torch.randn(num_combinations, in_features, r) * 0.02)
         # LoRA matrices: [num_combinations, r, out_features]
-        self.lora_B = nn.Parameter(torch.randn(num_combinations, r, out_features) * 0.02)
-        
-        # Initialize as identity for small initial effect
-        with torch.no_grad():
-            self.lora_B[:, :, :] = 0
+        self.lora_B = nn.Parameter(torch.randn(num_combinations, r, out_features) * 1e-4)
         
         # Cache for routing weights (set externally by Policy)
         self._current_w_route = None
@@ -501,7 +497,7 @@ class Policy(nn.Module):
             self.global_step += 1
         
         progress = min(1.0, self.global_step.item() / 20000.0)
-        tau = 1.0 - 0.9 * progress
+        tau = 1.0 - 0.5 * progress
         
         pooled_tokens_norm = F.normalize(pooled_tokens, p=2, dim=-1)
         task_protos_norm = F.normalize(task_protos, p=2, dim=-1)
@@ -749,9 +745,9 @@ class Policy(nn.Module):
         anneal_steps = 20000.0
         if hasattr(self, 'global_step'):
             progress = torch.clamp(self.global_step / anneal_steps, min=0.0, max=1.0)
-            semantic_weight = 0.1 * (1.0 - progress.item())
+            semantic_weight = 0.1 - 0.08 * progress.item()
         else:
-            semantic_weight = 0.01
+            semantic_weight = 0.05
             
         # 将退火后的语义损失加入总 Loss
         loss = loss + semantic_weight * semantic_loss_raw
