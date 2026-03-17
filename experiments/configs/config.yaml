@@ -42,6 +42,8 @@ dataset:
   dataset_encoder_postfix: "_${dataset.image_encoder}" # another postfix
   use_multiview: False # use multiple camera views
   normalize_state: True # whether to normalize the states in datasets
+  state_norm_mode: gaussian # normalization mode for state: gaussian ( standardize) or limits (min-max)
+  action_norm_mode: limits # normalization mode for action: gaussian or limits (min-max to [-1,1])
   regenerate: False # regenerate data
   action_multiple_horizon: True  # multiply action dimensions by horizon
   random_mask_obs: True # whether to randomize observation input length

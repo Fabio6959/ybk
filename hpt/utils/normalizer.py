@@ -26,15 +26,20 @@ class LinearNormalizer(DictOfTensorMixin):
         range_eps=1e-4,
         fit_offset=True,
         horizon=1,
+        mode_overrides: dict = None,
     ):
+        if mode_overrides is None:
+            mode_overrides = {}
+        
         if isinstance(data, dict):
             for key, value in data.items():
                 expand_scale = 1 if "action" not in key else horizon
+                key_mode = mode_overrides.get(key, mode)
                 self.params_dict[key] = _fit(
                     value,
                     last_n_dims=last_n_dims,
                     dtype=dtype,
-                    mode=mode,
+                    mode=key_mode,
                     output_max=output_max,
                     output_min=output_min,
                     range_eps=range_eps,

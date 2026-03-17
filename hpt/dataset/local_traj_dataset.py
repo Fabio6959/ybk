@@ -156,6 +156,8 @@ class LocalTrajDataset:
         use_multiview: bool = False,
         downsample_vision: bool = False,
         normalize_state: bool = False,
+        state_norm_mode: str = "gaussian",
+        action_norm_mode: str = "limits",
         action_multiple_horizon: bool = True,
         regenerate: bool = False,
         data_augment_ratio: int = 1,
@@ -183,6 +185,8 @@ class LocalTrajDataset:
         self.data_ratio = data_ratio
         self.use_multiview = use_multiview
         self.normalize_state = normalize_state
+        self.state_norm_mode = state_norm_mode
+        self.action_norm_mode = action_norm_mode
         self.downsample_vision = downsample_vision
         self.dataset_name_withpostfix = self.dataset_name + dataset_encoder_postfix + dataset_postfix
 
@@ -236,23 +240,37 @@ class LocalTrajDataset:
         if "image" in self[0]["data"]:
             self.num_views = self[0]["data"]["image"].shape[0]
 
-    def get_normalizer(self, mode="gaussian", **kwargs):
+    def get_normalizer(self, state_mode=None, action_mode=None, **kwargs):
         """
-        Returns a normalizer based on the provided mode.
+        Returns a normalizer with separate modes for state and action.
 
         Args:
-        - mode: "gaussian" for standardization (mean=0, std=1), "limits" for min-max normalization.
+        - state_mode: "gaussian" for standardization (mean=0, std=1), "limits" for min-max.
+        - action_mode: "gaussian" or "limits" for action normalization.
 
         Returns:
         - normalizer: The normalizer object.
 
         """
+        if state_mode is None:
+            state_mode = getattr(self, 'state_norm_mode', 'gaussian')
+        if action_mode is None:
+            action_mode = getattr(self, 'action_norm_mode', 'limits')
+        
         data = self._sample_to_data(self.replay_buffer)
         self.normalizer = LinearNormalizer()
-        self.normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
+        mode_overrides = {
+            "state": state_mode,
+            "action": action_mode
+        }
+        self.normalizer.fit(data=data, last_n_dims=1, mode=state_mode, mode_overrides=mode_overrides, **kwargs)
         for k, v in self.normalizer.params_dict.items():
-            print(f"normalizer {k} stats mean: {v['input_stats'].mean}")
-            print(f"normalizer {k} stats std: {v['input_stats'].std}")
+            if "mean" in v["input_stats"]:
+                print(f"normalizer {k} stats mean: {v['input_stats'].mean}")
+                print(f"normalizer {k} stats std: {v['input_stats'].std}")
+            else:
+                print(f"normalizer {k} stats min: {v['input_stats'].min}")
+                print(f"normalizer {k} stats max: {v['input_stats'].max}")
         return self.normalizer
 
     def create_replaybuffer_from_env(self, env_rollout_fn):
