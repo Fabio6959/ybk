@@ -66,12 +66,12 @@ def compute_ortho_loss(prototypes: torch.Tensor) -> torch.Tensor:
 
 
 class TaskEncoder(nn.Module):
-    def __init__(self, embed_dim=128, num_task_protos=21):
+    def __init__(self, embed_dim=128, num_task_protos=6):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_task_protos = num_task_protos
         
-        # 形状 [21, 128]
+        # 形状 [6, 128]
         self.task_prototypes = nn.Parameter(torch.randn(self.num_task_protos, self.embed_dim))
         
         # 将 128维映射到 CLIP 文本特征的 512维
@@ -209,7 +209,7 @@ class Policy(nn.Module):
         # agent/env/task prototype 
         self.prototype_num = 6
         self.prototype_dim = 64
-        self.num_task_protos = 21
+        self.num_task_protos = 6
         self.lora_r = 64  # LoRA rank
 
         # self.agent_head = nn.Linear(32 * embed_dim, embed_dim)
@@ -269,7 +269,7 @@ class Policy(nn.Module):
         
         # === 语义对齐新增：注册 CLIP 文本锚点 ===
         # 模拟 metaworld 21个任务的 CLIP text embeddings (512维)
-        dummy_clip_features = torch.randn(21, 512)
+        dummy_clip_features = torch.randn(6, 512)
         dummy_clip_features = F.normalize(dummy_clip_features, p=2, dim=-1)  # L2归一化
         self.register_buffer("task_clip_anchors", dummy_clip_features)
 
