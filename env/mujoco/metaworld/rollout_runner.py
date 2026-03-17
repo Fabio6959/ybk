@@ -108,8 +108,6 @@ def learner_trajectory_generator(env, policy, lang="", camera_name="view_1"):
         max_val = np.max(np.abs(a))
         if max_val > 1.0:
             a = a / max_val
-        if a.shape[-1] > 3:
-            a[..., 3] = np.where(a[..., 3] > 0.0, 1.0, -1.0)
         step_result = env.step(a)
         if len(step_result) == 5:
             o, r, terminated, truncated, info = step_result

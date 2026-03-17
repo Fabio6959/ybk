@@ -236,20 +236,23 @@ class LocalTrajDataset:
         if "image" in self[0]["data"]:
             self.num_views = self[0]["data"]["image"].shape[0]
 
-    def get_normalizer(self, mode="limits", **kwargs):
+    def get_normalizer(self, mode="gaussian", **kwargs):
         """
-        Returns an action normalizer based on the provided mode.
+        Returns a normalizer based on the provided mode.
+
+        Args:
+        - mode: "gaussian" for standardization (mean=0, std=1), "limits" for min-max normalization.
 
         Returns:
-        - normalizer: The action normalizer object.
+        - normalizer: The normalizer object.
 
         """
         data = self._sample_to_data(self.replay_buffer)
         self.normalizer = LinearNormalizer()
         self.normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
         for k, v in self.normalizer.params_dict.items():
-            print(f"normalizer {k} stats min: {v['input_stats'].min}")
-            print(f"normalizer {k} stats max: {v['input_stats'].max}")
+            print(f"normalizer {k} stats mean: {v['input_stats'].mean}")
+            print(f"normalizer {k} stats std: {v['input_stats'].std}")
         return self.normalizer
 
     def create_replaybuffer_from_env(self, env_rollout_fn):
