@@ -102,10 +102,11 @@ def train(
         train_step = len(train_loader) * epoch + batch_idx
         step_time = time.time() - start_time
         start_time = time.time()
-        log_stat(info_log, train_step, log_interval, log_name, batch["task_id"].item(),
+        task_id_val = batch["task_id"][0].item()
+        log_stat(info_log, train_step, log_interval, log_name, task_id_val,
                 domain_loss, model, optimizer, step_time, data_time, epoch)
 
-        task_id_key = f"task_{batch['task_id'].item()}_loss"
+        task_id_key = f"task_{task_id_val}_loss"
         pbar.set_description(
             f"Epoch: {epoch} {train_step} Step: {batch_idx}/{epoch_size} Time: {step_time:.3f}"
             f"{data_time:.3f} Loss: {info_log[task_id_key][-1]:.3f} Grad: {info_log['max_gradient'][-1]:.3f}"
@@ -139,8 +140,9 @@ def test(model, device, test_loader, epoch):
         # logging
         test_loss += loss.item()
         num_examples += 1
+        test_task_id = batch["task_id"][0].item()
         pbar.set_description(
-            f"Test Epoch: {epoch} Step: {batch_idx} Domain: task_{batch['task_id'].item()} Loss: {test_loss / (num_examples + 1):.3f}"
+            f"Test Epoch: {epoch} Step: {batch_idx} Domain: task_{test_task_id} Loss: {test_loss / (num_examples + 1):.3f}"
         )
     return test_loss / (num_examples + 1)
 

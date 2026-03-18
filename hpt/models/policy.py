@@ -646,7 +646,6 @@ class Policy(nn.Module):
         normalize_state = getattr(self.stem_spec, 'normalize_state', False) if hasattr(self, 'stem_spec') else False
         
         if normalize_state and "state" in data:
-            print(f"\n[紧急定位] 当前 normalizer 里真实的 keys 是: {list(self.normalizer.keys())}\n")
             data["state"] = self.normalizer[domain]["state"].normalize(data["state"])
 
         if "prev_actions" in data:
