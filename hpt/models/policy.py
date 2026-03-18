@@ -946,23 +946,10 @@ class Policy(nn.Module):
     def _get_domain_from_task_id(self, task_id):
         """Convert task_id tensor to domain string for inference.
         
-        Args:
-            task_id: torch.Tensor of shape [B] containing task IDs
-            
         Returns:
-            str: domain name (e.g., 'mujoco_metaworld')
+            str: unified domain name for all MetaWorld tasks
         """
-        if isinstance(task_id, torch.Tensor):
-            task_id_item = task_id.item() if task_id.numel() == 1 else task_id[0].item()
-        else:
-            task_id_item = task_id
-        
-        idx_to_task = {
-            0: 'basketball', 1: 'button-press-topdown', 2: 'coffee-pull',
-            3: 'door-close', 4: 'reach', 5: 'dial-turn'
-        }
-        base_name = idx_to_task.get(task_id_item, 'reach')
-        return f"{base_name}-v3-goal-observable"
+        return "mujoco_metaworld"
 
     @torch.no_grad()
     def get_action(self, data: dict, domain: str = None):
