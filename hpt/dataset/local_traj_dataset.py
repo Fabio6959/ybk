@@ -442,6 +442,11 @@ class LocalTrajDataset:
             
             raw_domain = raw_task_name if raw_task_name is not None else self.dataset_name
             task_base_name = self.task_name_regex.sub('', raw_domain)
+            
+            # 脏数据修复：处理残留的 -v 后缀或特殊情况
+            if task_base_name.endswith('-v'):
+                task_base_name = task_base_name[:-2]
+            
             if task_base_name not in self.task_name_to_proto_idx:
                 raise ValueError(f"严重警告：发现未知任务 '{task_base_name}'，请把它加到映射表里！")
             task_id = self.task_name_to_proto_idx[task_base_name]

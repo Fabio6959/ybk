@@ -720,6 +720,10 @@ class Policy(nn.Module):
             domain (str): The domain of the data.
             data (Tensor): The input data.
         """
+        # 拦截未知的具体 task_name，统一重定向到宏观 domain
+        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
+            domain = self.domains[0]
+        
         data = self.preprocess_states(domain, data)
 
         # stem pass
@@ -816,6 +820,10 @@ class Policy(nn.Module):
             data: Dictionary of observations (vision, proprioception, etc).
             text_features: Optional text embeddings for task encoding.
         """
+        # 拦截未知的具体 task_name，统一重定向到宏观 domain
+        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
+            domain = self.domains[0]
+        
         # pooling the features
         features, _, _, _ = self.forward_features(domain, data, text_features)
 
