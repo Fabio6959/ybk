@@ -211,6 +211,20 @@ class Policy(nn.Module):
         self.prototype_dim = 64
         self.num_task_protos = 6
         self.lora_r = 64  # LoRA rank
+        
+        # Task name to Prototype Index mapping for Hard-routing
+        self.task_proto_mapping = {
+            0: ['basketball', 'bin-picking', 'assembly', 'disassemble'],
+            1: ['button-press', 'button-press-topdown', 'button-press-topdown-wall', 'button-press-wall', 'coffee-button'],
+            2: ['coffee-pull', 'door-open', 'drawer-open'],
+            3: ['door-close', 'drawer-close', 'door-lock', 'door-unlock', 'box-close'],
+            4: ['coffee-push', 'reach', 'push'],
+            5: ['dial-turn', 'faucet-open', 'faucet-close', 'hand-insert', 'peg-insert-side', 'peg-unplug-side'],
+        }
+        self.task_name_to_proto_idx = {}
+        for idx, task_names in self.task_proto_mapping.items():
+            for name in task_names:
+                self.task_name_to_proto_idx[name] = idx
 
         # self.agent_head = nn.Linear(32 * embed_dim, embed_dim)
         self.agent_head = nn.Sequential(
@@ -484,7 +498,7 @@ class Policy(nn.Module):
                                     masks[mask_idx] = (1 - importance) * masks[mask_idx] + importance * new_mask
                                 mask_idx += 1
     
-    def feature2proto(self, tokens, text_features=None):
+    def feature2proto(self, tokens, text_features=None, domain=None):
         B, L, D = tokens.shape
         
         pooled_tokens = tokens.mean(dim=1)
@@ -504,7 +518,18 @@ class Policy(nn.Module):
         agent_protos_norm = F.normalize(agent_protos, p=2, dim=-1)
         env_protos_norm = F.normalize(env_protos, p=2, dim=-1)
         
-        w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+        # Hard-routing for task prototypes based on domain name
+        if domain is not None:
+            task_base_name = domain.split('-v3')[0].replace('-goal-observable', '')
+            proto_idx = self.task_name_to_proto_idx.get(task_base_name, None)
+            if proto_idx is not None:
+                w_t = torch.zeros(B, self.num_task_protos, device=tokens.device, dtype=tokens.dtype)
+                w_t[:, proto_idx] = 1.0
+            else:
+                w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+        else:
+            w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+        
         w_a = torch.softmax(torch.matmul(pooled_tokens_norm, agent_protos_norm.T) / tau, dim=-1)
         w_e = torch.softmax(torch.matmul(pooled_tokens_norm, env_protos_norm.T) / tau, dim=-1)
         
@@ -540,7 +565,7 @@ class Policy(nn.Module):
             tokens = torch.cat([tokens, action_tokens], dim=-2)
         
         ori_tokens = tokens
-        proto_tokens, w_route = self.feature2proto(tokens, text_features)
+        proto_tokens, w_route = self.feature2proto(tokens, text_features, domain=domain)
         position_tokens = self.get_position_embedding(proto_tokens, self.embed_dim)
         tokens = tokens + position_tokens
         # proto_tokens = self.feature2proto(tokens)

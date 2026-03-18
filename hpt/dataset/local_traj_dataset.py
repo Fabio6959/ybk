@@ -419,6 +419,9 @@ class LocalTrajDataset:
                     sample["action"] = val[
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
+            
+            # Use dataset_name as domain for hard-routing
+            # dataset_name should be the task name like 'button-press-v3-goal-observable'
             return {"domain": self.dataset_name, "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")

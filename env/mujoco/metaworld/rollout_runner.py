@@ -85,7 +85,7 @@ def writer_for(tag, fps, res, src_folder="demonstrations"):
 
 
 @torch.no_grad()
-def learner_trajectory_generator(env, policy, lang="", camera_name="view_1"):
+def learner_trajectory_generator(env, policy, lang="", camera_name="view_1", domain=None):
     """generate a trajectory rollout from a policy and a metaworld environment"""
     env.reset()
     env.reset_model()
@@ -104,7 +104,7 @@ def learner_trajectory_generator(env, policy, lang="", camera_name="view_1"):
 
     step_data = get_observation_dict(o, img)
     for _ in range(env.max_path_length):
-        a = policy.get_action(step_data)
+        a = policy.get_action(step_data, domain=domain)
         max_val = np.max(np.abs(a))
         if max_val > 1.0:
             a = a / max_val
@@ -208,7 +208,7 @@ class RolloutRunner:
                     q_pos = []
 
                     step = 0
-                    for o, r, done, info, img in learner_trajectory_generator(env, policy, language_instruction):
+                    for o, r, done, info, img in learner_trajectory_generator(env, policy, language_instruction, domain=tag):
                         traj_length += 1
                         eps_reward += r
                         
