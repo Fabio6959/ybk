@@ -646,6 +646,7 @@ class Policy(nn.Module):
         normalize_state = getattr(self.stem_spec, 'normalize_state', False) if hasattr(self, 'stem_spec') else False
         
         if normalize_state and "state" in data:
+            print(f"\n[紧急定位] 当前 normalizer 里真实的 keys 是: {list(self.normalizer.keys())}\n")
             data["state"] = self.normalizer[domain]["state"].normalize(data["state"])
 
         if "prev_actions" in data:
@@ -947,9 +948,11 @@ class Policy(nn.Module):
         """Convert task_id tensor to domain string for inference.
         
         Returns:
-            str: unified domain name for all MetaWorld tasks
+            str: domain name from self.domains (set during init_domain_head)
         """
-        return "mujoco_metaworld"
+        if hasattr(self, 'domains') and len(self.domains) > 0:
+            return self.domains[0]
+        raise RuntimeError("domains not initialized")
 
     @torch.no_grad()
     def get_action(self, data: dict, domain: str = None):
