@@ -642,6 +642,10 @@ class Policy(nn.Module):
         """
         Pre-process proprioception-related inputs, e.g. normalizing states
         """
+        # 拦截未知的具体 task_name，统一重定向到宏观 domain
+        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
+            domain = self.domains[0]
+        
         # Check if stem_spec exists and has normalize_state attribute
         normalize_state = getattr(self.stem_spec, 'normalize_state', False) if hasattr(self, 'stem_spec') else False
         
