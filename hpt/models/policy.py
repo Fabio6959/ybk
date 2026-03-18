@@ -742,7 +742,11 @@ class Policy(nn.Module):
         """Compute the loss for the training loop forward pass.
         """
         self.train_mode = True
-        domain, data = batch["domain"][0], batch["data"]
+        task_id = batch["task_id"]
+        data = batch["data"]
+        
+        domain = self._get_domain_from_task_id(task_id)
+        
         features, ori_tokens, proto_tokens, w_route = self.forward_features(domain, data)
 
         # normalize the labels
@@ -938,6 +942,27 @@ class Policy(nn.Module):
         # current steps in open-loop rollouts
         self.openloop_traj_step = self.action_horizon - 1
         self.language_embedding = None
+
+    def _get_domain_from_task_id(self, task_id):
+        """Convert task_id tensor to domain string for inference.
+        
+        Args:
+            task_id: torch.Tensor of shape [B] containing task IDs
+            
+        Returns:
+            str: domain name (e.g., 'mujoco_metaworld')
+        """
+        if isinstance(task_id, torch.Tensor):
+            task_id_item = task_id.item() if task_id.numel() == 1 else task_id[0].item()
+        else:
+            task_id_item = task_id
+        
+        idx_to_task = {
+            0: 'basketball', 1: 'button-press-topdown', 2: 'coffee-pull',
+            3: 'door-close', 4: 'reach', 5: 'dial-turn'
+        }
+        base_name = idx_to_task.get(task_id_item, 'reach')
+        return f"{base_name}-v3-goal-observable"
 
     @torch.no_grad()
     def get_action(self, data: dict, domain: str = None):

@@ -35,10 +35,11 @@ info_key = [
 
 info_log = {k: deque([], maxlen=50) for k in info_key}
 
-def log_stat(info_log, train_step, log_interval, log_name, domain, loss, model, optimizer, step_time, data_time, epoch):
+def log_stat(info_log, train_step, log_interval, log_name, task_id, loss, model, optimizer, step_time, data_time, epoch):
     """
     log wandb statistics for training
     """
+    domain = f"task_{task_id}"
     if domain + "_loss" not in info_log:
         info_log[domain + "_loss"] = deque([], maxlen=50)
     info_log[domain + "_loss"].append(loss.item())
@@ -101,12 +102,13 @@ def train(
         train_step = len(train_loader) * epoch + batch_idx
         step_time = time.time() - start_time
         start_time = time.time()
-        log_stat(info_log, train_step, log_interval, log_name, batch["domain"][0],
+        log_stat(info_log, train_step, log_interval, log_name, batch["task_id"].item(),
                 domain_loss, model, optimizer, step_time, data_time, epoch)
 
+        task_id_key = f"task_{batch['task_id'].item()}_loss"
         pbar.set_description(
             f"Epoch: {epoch} {train_step} Step: {batch_idx}/{epoch_size} Time: {step_time:.3f}"
-            f"{data_time:.3f} Loss: {info_log[batch['domain'][0] + '_loss'][-1]:.3f} Grad: {info_log['max_gradient'][-1]:.3f}"
+            f"{data_time:.3f} Loss: {info_log[task_id_key][-1]:.3f} Grad: {info_log['max_gradient'][-1]:.3f}"
         )
 
     return {k: np.mean(v) for k, v in info_log.items() if len(v) > 1}
@@ -138,7 +140,7 @@ def test(model, device, test_loader, epoch):
         test_loss += loss.item()
         num_examples += 1
         pbar.set_description(
-            f"Test Epoch: {epoch} Step: {batch_idx} Domain: {batch['domain'][0]} Loss: {test_loss / (num_examples + 1):.3f}"
+            f"Test Epoch: {epoch} Step: {batch_idx} Domain: task_{batch['task_id'].item()} Loss: {test_loss / (num_examples + 1):.3f}"
         )
     return test_loss / (num_examples + 1)
 

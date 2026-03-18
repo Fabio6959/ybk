@@ -4,6 +4,7 @@
 
 import numpy as np
 import copy
+import torch
 
 from hpt.utils.replay_buffer import ReplayBuffer
 from hpt.utils.sampler import SequenceSampler, get_val_mask
@@ -193,6 +194,17 @@ class LocalTrajDataset:
         self.action_norm_mode = action_norm_mode
         self.downsample_vision = downsample_vision
         self.dataset_name_withpostfix = self.dataset_name + dataset_encoder_postfix + dataset_postfix
+
+        self.task_name_to_proto_idx = {
+            'basketball': 0, 'bin-picking': 0, 'assembly': 0, 'disassemble': 0,
+            'button-press': 1, 'button-press-topdown': 1, 'button-press-topdown-wall': 1, 'button-press-wall': 1, 'coffee-button': 1,
+            'coffee-pull': 2, 'door-open': 2, 'drawer-open': 2,
+            'door-close': 3, 'drawer-close': 3, 'door-lock': 3, 'door-unlock': 3, 'box-close': 3,
+            'coffee-push': 4, 'reach': 4, 'push': 4,
+            'dial-turn': 5, 'faucet-open': 5, 'faucet-close': 5, 'hand-insert': 5, 'peg-insert-side': 5, 'peg-unplug-side': 5,
+        }
+        import re
+        self.task_name_regex = re.compile(r'-v\d+.*$')
 
         if use_multiview:
             self.dataset_name_withpostfix = self.dataset_name_withpostfix + "_multiview"
@@ -412,11 +424,11 @@ class LocalTrajDataset:
             task_name = None
             for key, val in sample.items():
                 if key == "task_name":
-                    # Extract task_name from the first step (all steps in a sequence have the same task)
                     if isinstance(val, (list, np.ndarray)):
                         task_name = val[0] if len(val) > 0 else None
                     else:
                         task_name = val
+                    del sample[key]
                     continue
                 if key != "action":
                     if self.proprioception_expand and key == "state":
@@ -427,14 +439,15 @@ class LocalTrajDataset:
                         sample[key] = val[: self.observation_horizon]
 
                 else:
-                    # future actions
                     sample["action"] = val[
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
             
-            # Use task_name as domain for hard-routing, fallback to dataset_name
-            domain = task_name if task_name is not None else self.dataset_name
-            return {"domain": domain, "data": sample}
+            raw_domain = task_name if task_name is not None else self.dataset_name
+            task_base_name = self.task_name_regex.sub('', raw_domain)
+            task_id = self.task_name_to_proto_idx.get(task_base_name, 0)
+            
+            return {"task_id": torch.tensor(task_id, dtype=torch.long), "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")
             raise
