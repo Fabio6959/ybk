@@ -2,6 +2,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
 
+import re
 import numpy as np
 import copy
 import torch
@@ -203,7 +204,6 @@ class LocalTrajDataset:
             'coffee-push': 4, 'reach': 4, 'push': 4,
             'dial-turn': 5, 'faucet-open': 5, 'faucet-close': 5, 'hand-insert': 5, 'peg-insert-side': 5, 'peg-unplug-side': 5,
         }
-        import re
         self.task_name_regex = re.compile(r'-v\d+.*$')
 
         if use_multiview:
@@ -421,15 +421,13 @@ class LocalTrajDataset:
         """get data item for each trajectory sequence"""
         try:
             sample = self.sampler.sample_sequence(idx)
-            task_name = None
+            
+            raw_task_name = sample.pop("task_name", None)
+            if raw_task_name is not None:
+                if isinstance(raw_task_name, (list, np.ndarray)):
+                    raw_task_name = raw_task_name[0] if len(raw_task_name) > 0 else None
+            
             for key, val in sample.items():
-                if key == "task_name":
-                    if isinstance(val, (list, np.ndarray)):
-                        task_name = val[0] if len(val) > 0 else None
-                    else:
-                        task_name = val
-                    del sample[key]
-                    continue
                 if key != "action":
                     if self.proprioception_expand and key == "state":
                         sample[key] = np.tile(sample[key][..., None], (1, 1, self.proprioception_expand_dim))                
@@ -437,17 +435,19 @@ class LocalTrajDataset:
                         sample[key] = val[:1]
                     else:
                         sample[key] = val[: self.observation_horizon]
-
                 else:
                     sample["action"] = val[
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
             
-            raw_domain = task_name if task_name is not None else self.dataset_name
+            raw_domain = raw_task_name if raw_task_name is not None else self.dataset_name
             task_base_name = self.task_name_regex.sub('', raw_domain)
-            task_id = self.task_name_to_proto_idx.get(task_base_name, 0)
+            if task_base_name not in self.task_name_to_proto_idx:
+                raise ValueError(f"严重警告：发现未知任务 '{task_base_name}'，请把它加到映射表里！")
+            task_id = self.task_name_to_proto_idx[task_base_name]
+            sample["task_id"] = torch.tensor(task_id, dtype=torch.long)
             
-            return {"task_id": torch.tensor(task_id, dtype=torch.long), "data": sample}
+            return {"task_id": sample["task_id"], "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")
             raise
