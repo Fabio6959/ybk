@@ -358,7 +358,8 @@ def generate_dataset_rollouts(
             for state, action, image in zip(eps_states, eps_actions, eps_images):
                 step = {
                     "action": action,
-                    "observation": {"state": state, "image": image}
+                    "observation": {"state": state, "image": image},
+                    "task_name": tag
                 }
                 steps.append(step)
             data_dict = {"steps": steps}

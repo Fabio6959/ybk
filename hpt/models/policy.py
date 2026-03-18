@@ -3,6 +3,7 @@
 # --------------------------------------------------------
 
 import logging
+import re
 from functools import partial
 import hydra
 from omegaconf import OmegaConf
@@ -520,7 +521,7 @@ class Policy(nn.Module):
         
         # Hard-routing for task prototypes based on domain name
         if domain is not None:
-            task_base_name = domain.split('-v3')[0].replace('-goal-observable', '')
+            task_base_name = re.sub(r'-v\d+.*$', '', domain)
             proto_idx = self.task_name_to_proto_idx.get(task_base_name, None)
             if proto_idx is not None:
                 w_t = torch.zeros(B, self.num_task_protos, device=tokens.device, dtype=tokens.dtype)

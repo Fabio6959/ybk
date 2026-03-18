@@ -79,6 +79,10 @@ def process_dataset_step(
     state = select_proprioception(step["observation"])
     if state is not None:
         step_dict["state"] = state.astype("float32")
+    
+    # Store task_name for hard-routing
+    if "task_name" in step:
+        step_dict["task_name"] = step["task_name"]
 
     if precompute:
         # recompute the embeddings. ~0.5s per data
@@ -405,7 +409,15 @@ class LocalTrajDataset:
         """get data item for each trajectory sequence"""
         try:
             sample = self.sampler.sample_sequence(idx)
+            task_name = None
             for key, val in sample.items():
+                if key == "task_name":
+                    # Extract task_name from the first step (all steps in a sequence have the same task)
+                    if isinstance(val, (list, np.ndarray)):
+                        task_name = val[0] if len(val) > 0 else None
+                    else:
+                        task_name = val
+                    continue
                 if key != "action":
                     if self.proprioception_expand and key == "state":
                         sample[key] = np.tile(sample[key][..., None], (1, 1, self.proprioception_expand_dim))                
@@ -420,9 +432,9 @@ class LocalTrajDataset:
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
             
-            # Use dataset_name as domain for hard-routing
-            # dataset_name should be the task name like 'button-press-v3-goal-observable'
-            return {"domain": self.dataset_name, "data": sample}
+            # Use task_name as domain for hard-routing, fallback to dataset_name
+            domain = task_name if task_name is not None else self.dataset_name
+            return {"domain": domain, "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")
             raise
