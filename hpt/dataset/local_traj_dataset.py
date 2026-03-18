@@ -204,7 +204,7 @@ class LocalTrajDataset:
             'coffee-push': 4, 'reach': 4, 'push': 4,
             'dial-turn': 5, 'faucet-open': 5, 'faucet-close': 5, 'hand-insert': 5, 'peg-insert-side': 5, 'peg-unplug-side': 5,
         }
-        self.task_name_regex = re.compile(r'-v\d+.*$')
+        self.task_name_regex = re.compile(r'-v\d*.*$')
 
         if use_multiview:
             self.dataset_name_withpostfix = self.dataset_name_withpostfix + "_multiview"
