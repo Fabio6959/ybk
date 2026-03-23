@@ -3,7 +3,6 @@
 # --------------------------------------------------------
 
 import logging
-import re
 from functools import partial
 import hydra
 from omegaconf import OmegaConf
@@ -33,6 +32,87 @@ from hpt.utils.utils import (
 )
 
 STD_SCALE = 0.02
+
+
+def gumbel_softmax(logits: torch.Tensor, tau: float = 1.0, hard: bool = False, dim: int = -1) -> torch.Tensor:
+    """
+    Gumbel-Softmax with Straight-Through Estimator (STE).
+    
+    Key insight:
+    - Forward pass: Uses hard (one-hot) for true sparsity
+    - Backward pass: Uses soft gradients for differentiability
+    
+    This achieves the best of both worlds:
+    - True sparse activation (only selected experts are computed)
+    - Full gradient flow (all experts receive gradient signals)
+    
+    Args:
+        logits: Unnormalized log probabilities [*, N]
+        tau: Temperature for Gumbel-Softmax (lower = sharper)
+        hard: If True, use STE (hard forward, soft backward)
+        dim: Dimension to apply softmax
+    
+    Returns:
+        samples: Sampled one-hot vectors (if hard=True) or soft samples
+    """
+    # Gumbel noise: -log(-log(U)) where U ~ Uniform(0, 1)
+    gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits) + 1e-8) + 1e-8)
+    
+    # Soft sample with Gumbel noise
+    y_soft = F.softmax((logits + gumbel_noise) / tau, dim=dim)
+    
+    if hard:
+        # Straight-Through Estimator
+        # Forward: argmax -> one-hot (hard, sparse)
+        # Backward: y_soft gradients (soft, differentiable)
+        index = y_soft.argmax(dim=dim, keepdim=True)
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        
+        # STE trick: y_hard in forward, y_soft gradient in backward
+        # (y_hard - y_soft) has zero gradient, so we add y_soft back for backward
+        return y_hard - y_soft.detach() + y_soft
+    else:
+        return y_soft
+
+
+def topk_gumbel_softmax(logits: torch.Tensor, k: int = 1, tau: float = 1.0, hard: bool = True, dim: int = -1) -> torch.Tensor:
+    """
+    Top-k Gumbel-Softmax for sparse routing.
+    
+    Instead of selecting only 1 expert (standard Gumbel-Softmax),
+    this selects top-k experts and redistributes probability mass.
+    
+    Args:
+        logits: Unnormalized log probabilities [*, N]
+        k: Number of experts to select
+        tau: Temperature
+        hard: If True, use STE
+        dim: Dimension to apply
+    
+    Returns:
+        samples: Routing weights with only top-k non-zero
+    """
+    N = logits.size(dim)
+    k = min(k, N)
+    
+    # Get top-k values and indices
+    topk_values, topk_indices = torch.topk(logits, k=k, dim=dim)
+    
+    # Apply Gumbel-Softmax only on top-k
+    gumbel_noise = -torch.log(-torch.log(torch.rand_like(topk_values) + 1e-8) + 1e-8)
+    y_soft_topk = F.softmax((topk_values + gumbel_noise) / tau, dim=dim)
+    
+    if hard:
+        # STE for top-k
+        index = y_soft_topk.argmax(dim=dim, keepdim=True)
+        y_hard_topk = torch.zeros_like(topk_values).scatter_(dim, index, 1.0)
+        y_soft_topk = y_hard_topk - y_soft_topk.detach() + y_soft_topk
+    
+    # Scatter back to full dimension
+    y_full = torch.zeros_like(logits)
+    y_full.scatter_(dim, topk_indices, y_soft_topk)
+    
+    return y_full
 
 
 def compute_ortho_loss(prototypes: torch.Tensor) -> torch.Tensor:
@@ -66,6 +146,73 @@ def compute_ortho_loss(prototypes: torch.Tensor) -> torch.Tensor:
     return loss
 
 
+def compute_load_balance_loss(w_route: torch.Tensor) -> torch.Tensor:
+    """
+    Compute load balancing loss to prevent expert collapse.
+    
+    Based on Switch Transformer: https://arxiv.org/abs/2101.03961
+    
+    L_aux = N * sum(f_i * P_i)
+    where:
+        f_i = fraction of tokens routed to expert i (routing frequency)
+        P_i = average routing probability for expert i
+    
+    This loss encourages uniform routing distribution across all experts.
+    
+    Args:
+        w_route: [B, N] routing weights (after softmax)
+    
+    Returns:
+        loss: load balancing auxiliary loss
+    """
+    N = w_route.shape[-1]  # number of experts
+    
+    # f_i: fraction of tokens routed to expert i
+    # Using soft routing weights instead of hard assignment for differentiability
+    f = w_route.mean(dim=0)  # [N]
+    
+    # P_i: average routing probability for expert i
+    # Using squared weights to emphasize confident routing
+    P = (w_route ** 2).sum(dim=0) / (w_route.sum(dim=0) + 1e-8)  # [N]
+    
+    # Load balancing loss: minimize when f_i = P_i = 1/N for all i
+    aux_loss = N * torch.sum(f * P)
+    
+    return aux_loss
+
+
+def compute_entropy_loss(w_route: torch.Tensor) -> torch.Tensor:
+    """
+    Compute entropy loss to encourage sharp (specialized) routing distributions.
+    
+    Key insight: 
+    - Load balance loss operates at BATCH level (macro equilibrium)
+    - Entropy loss operates at TOKEN level (micro specialization)
+    
+    Without entropy penalty, the network would converge to uniform distribution
+    for every sample, achieving "balance" but losing expert specialization.
+    
+    Entropy minimization encourages each sample to make a confident (low-entropy)
+    routing decision, while load balance ensures different samples choose different
+    experts at the batch level.
+    
+    Args:
+        w_route: [B, N] routing weights (after softmax)
+    
+    Returns:
+        loss: entropy loss (minimize to encourage sharp distributions)
+    """
+    # Entropy of each sample's routing distribution
+    # H(w) = -sum(w_i * log(w_i))
+    # Max entropy = log(N) (uniform), Min entropy = 0 (one-hot)
+    entropy = -torch.sum(w_route * torch.log(w_route + 1e-8), dim=-1)  # [B]
+    
+    # Average entropy across batch
+    mean_entropy = entropy.mean()
+    
+    return mean_entropy
+
+
 class TaskEncoder(nn.Module):
     def __init__(self, embed_dim=128, num_task_protos=6):
         super().__init__()
@@ -88,6 +235,10 @@ class MoLoRALayer(nn.Module):
     """
     Mixture of LoRAs (MoLoRA) for efficient fine-tuning.
     Replaces nn.Linear layers with low-rank adapters weighted by routing scores.
+    
+    Supports sparse activation via Gumbel-Softmax:
+    - When w_route is sparse (one-hot from STE), only activated experts are computed
+    - This achieves true computational efficiency similar to Top-k MoE
     """
     def __init__(self, in_features: int, out_features: int, num_combinations: int, r: int = 64):
         super().__init__()
@@ -110,8 +261,11 @@ class MoLoRALayer(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass with soft routing.
-        Uses weight blending approach: first blend LoRA weights, then apply to input.
+        Forward pass with sparse routing support.
+        
+        Key optimization:
+        - When w_route is one-hot (from STE), only compute the activated expert
+        - When w_route is dense, fall back to weighted blending
         
         Args:
             x: [B, in_features] or [B, T, in_features] input tensor
@@ -119,47 +273,63 @@ class MoLoRALayer(nn.Module):
         Returns:
             y: [B, out_features] or [B, T, out_features] output tensor
         """
-        # 1. 获取缓存的路由权重
         w = getattr(self, "_current_w_route", None)
-        B_x = x.shape[0]  # 当前实际流入的数据 Batch Size
+        B_x = x.shape[0]
         
         if w is None:
             N = self.lora_A.shape[0]
             w = torch.ones(B_x, N, device=x.device, dtype=x.dtype) / N
         else:
-            # 关键修复：确保 w 的 batch size 与 x 对齐！
             B_w = w.shape[0]
             if B_w != B_x:
-                # 如果缓存的 w 比当前数据大，说明数据被截断了，我们切片取前 B_x 个
-                # （这在 HPT/MoDP 的特征分流/重构过程中非常常见）
                 if B_w > B_x:
                     w = w[:B_x, :]
-                # 如果意外出现了 w 比 x 小的情况，做 padding 或 repeat 兜底
                 else:
                     repeats = (B_x + B_w - 1) // B_w
                     w = w.repeat(repeats, 1)[:B_x, :]
-
-        # 2. 动态加权融合该 Batch 的 LoRA 专家矩阵
-        # w shape: [B_x, N_total]
-        blended_A = torch.einsum('bn, nir -> bir', w, self.lora_A)
-        blended_B = torch.einsum('bn, nro -> bro', w, self.lora_B)
-
-        # 3. 计算 LoRA 输出
-        if x.dim() == 3:
-            lora_mid = torch.einsum('bti, bir -> btr', x, blended_A)
-            lora_out = torch.einsum('btr, bro -> bto', lora_mid, blended_B)
-        elif x.dim() == 2:
-            lora_mid = torch.einsum('bi, bir -> br', x, blended_A)
-            lora_out = torch.einsum('br, bro -> bo', lora_mid, blended_B)
+        
+        # Check if routing is sparse (one-hot from STE)
+        # A one-hot vector has exactly one element = 1, rest = 0
+        is_sparse = (w.sum(dim=-1) - 1.0).abs().max() < 1e-5 and (w.max(dim=-1)[0] - 1.0).abs().max() < 1e-5
+        
+        if is_sparse and not self.training:
+            # Sparse path: only compute activated experts
+            # Get the index of the activated expert for each sample
+            expert_indices = w.argmax(dim=-1)  # [B]
+            
+            # Gather the LoRA matrices for the activated experts
+            # lora_A: [N, in, r], lora_B: [N, r, out]
+            selected_A = self.lora_A[expert_indices]  # [B, in, r]
+            selected_B = self.lora_B[expert_indices]  # [B, r, out]
+            
+            # Compute LoRA output for each sample with its selected expert
+            if x.dim() == 3:
+                # x: [B, T, in], selected_A: [B, in, r]
+                lora_mid = torch.einsum('bti, bir -> btr', x, selected_A)
+                lora_out = torch.einsum('btr, bro -> bto', lora_mid, selected_B)
+            else:
+                # x: [B, in], selected_A: [B, in, r]
+                lora_mid = torch.einsum('bi, bir -> br', x, selected_A)
+                lora_out = torch.einsum('br, bro -> bo', lora_mid, selected_B)
         else:
-            raise ValueError(f"Expected 2D or 3D input, got {x.dim()}D")
-
-        # 4. 计算 Base 层的输出并相加
+            # Dense path: weighted blending (used during training for gradient flow)
+            blended_A = torch.einsum('bn, nir -> bir', w, self.lora_A)
+            blended_B = torch.einsum('bn, nro -> bro', w, self.lora_B)
+            
+            if x.dim() == 3:
+                lora_mid = torch.einsum('bti, bir -> btr', x, blended_A)
+                lora_out = torch.einsum('btr, bro -> bto', lora_mid, blended_B)
+            elif x.dim() == 2:
+                lora_mid = torch.einsum('bi, bir -> br', x, blended_A)
+                lora_out = torch.einsum('br, bro -> bo', lora_mid, blended_B)
+            else:
+                raise ValueError(f"Expected 2D or 3D input, got {x.dim()}D")
+        
+        # Add base layer output
         if self.weight is not None:
             base_out = F.linear(x, self.weight, self.bias)
             return base_out + lora_out
         else:
-            # If no base layer (standalone MoLoRA), return only LoRA output
             return lora_out
 
 
@@ -519,20 +689,31 @@ class Policy(nn.Module):
         agent_protos_norm = F.normalize(agent_protos, p=2, dim=-1)
         env_protos_norm = F.normalize(env_protos, p=2, dim=-1)
         
-        # Hard-routing for task prototypes based on domain name
+        # Compute logits for routing
+        logits_a = torch.matmul(pooled_tokens_norm, agent_protos_norm.T) / tau
+        logits_e = torch.matmul(pooled_tokens_norm, env_protos_norm.T) / tau
+        logits_t = torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau
+        
+        # Gumbel-Softmax with STE for true sparsity
+        # Training: hard=True (STE: forward=one-hot, backward=soft)
+        # Inference: hard=False (soft routing for stability)
+        use_hard = self.training
+        
+        # Hard-routing for task prototypes based on domain name (overrides Gumbel-Softmax)
         if domain is not None:
-            task_base_name = re.sub(r'-v\d+.*$', '', domain)
+            task_base_name = domain.split('-v3')[0].replace('-goal-observable', '')
             proto_idx = self.task_name_to_proto_idx.get(task_base_name, None)
             if proto_idx is not None:
                 w_t = torch.zeros(B, self.num_task_protos, device=tokens.device, dtype=tokens.dtype)
                 w_t[:, proto_idx] = 1.0
             else:
-                w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+                w_t = gumbel_softmax(logits_t, tau=tau, hard=use_hard)
         else:
-            w_t = torch.softmax(torch.matmul(pooled_tokens_norm, task_protos_norm.T) / tau, dim=-1)
+            w_t = gumbel_softmax(logits_t, tau=tau, hard=use_hard)
         
-        w_a = torch.softmax(torch.matmul(pooled_tokens_norm, agent_protos_norm.T) / tau, dim=-1)
-        w_e = torch.softmax(torch.matmul(pooled_tokens_norm, env_protos_norm.T) / tau, dim=-1)
+        # Agent and Env use Gumbel-Softmax with STE
+        w_a = gumbel_softmax(logits_a, tau=tau, hard=use_hard)
+        w_e = gumbel_softmax(logits_e, tau=tau, hard=use_hard)
         
         w_route = torch.einsum('bi, bj, bk -> bijk', w_a, w_e, w_t).reshape(B, -1)
         
@@ -642,10 +823,6 @@ class Policy(nn.Module):
         """
         Pre-process proprioception-related inputs, e.g. normalizing states
         """
-        # 拦截未知的具体 task_name，统一重定向到宏观 domain
-        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
-            domain = self.domains[0]
-        
         # Check if stem_spec exists and has normalize_state attribute
         normalize_state = getattr(self.stem_spec, 'normalize_state', False) if hasattr(self, 'stem_spec') else False
         
@@ -720,10 +897,6 @@ class Policy(nn.Module):
             domain (str): The domain of the data.
             data (Tensor): The input data.
         """
-        # 拦截未知的具体 task_name，统一重定向到宏观 domain
-        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
-            domain = self.domains[0]
-        
         data = self.preprocess_states(domain, data)
 
         # stem pass
@@ -750,11 +923,7 @@ class Policy(nn.Module):
         """Compute the loss for the training loop forward pass.
         """
         self.train_mode = True
-        task_id = batch["task_id"]
-        data = batch["data"]
-        
-        domain = self._get_domain_from_task_id(task_id)
-        
+        domain, data = batch["domain"][0], batch["data"]
         features, ori_tokens, proto_tokens, w_route = self.forward_features(domain, data)
 
         # normalize the labels
@@ -775,6 +944,18 @@ class Policy(nn.Module):
         if self.env_prototypes is not None and len(self.env_prototypes) > 0:
             loss_ortho_env = compute_ortho_loss(self.env_prototypes)
             loss += 0.01 * loss_ortho_env  # Weight for env prototypes
+        
+        # Load balancing loss (Batch-level) + Entropy loss (Token-level)
+        # Key insight: Balance ensures macro equilibrium, Entropy ensures micro specialization
+        if w_route is not None:
+            # Batch-level: encourage uniform expert usage across the batch
+            load_balance_loss = compute_load_balance_loss(w_route)
+            loss += 0.01 * load_balance_loss
+            
+            # Token-level: encourage sharp (low-entropy) routing for each sample
+            # This prevents the network from collapsing to uniform distribution
+            entropy_loss = compute_entropy_loss(w_route)
+            loss += 0.01 * entropy_loss
         
         # 计算大模型语义对齐损失
         semantic_loss_raw = self.calc_semantic_loss()
@@ -820,10 +1001,6 @@ class Policy(nn.Module):
             data: Dictionary of observations (vision, proprioception, etc).
             text_features: Optional text embeddings for task encoding.
         """
-        # 拦截未知的具体 task_name，统一重定向到宏观 domain
-        if domain not in self.normalizer and hasattr(self, 'domains') and len(self.domains) > 0:
-            domain = self.domains[0]
-        
         # pooling the features
         features, _, _, _ = self.forward_features(domain, data, text_features)
 
@@ -954,16 +1131,6 @@ class Policy(nn.Module):
         # current steps in open-loop rollouts
         self.openloop_traj_step = self.action_horizon - 1
         self.language_embedding = None
-
-    def _get_domain_from_task_id(self, task_id):
-        """Convert task_id tensor to domain string for inference.
-        
-        Returns:
-            str: domain name from self.domains (set during init_domain_head)
-        """
-        if hasattr(self, 'domains') and len(self.domains) > 0:
-            return self.domains[0]
-        raise RuntimeError("domains not initialized")
 
     @torch.no_grad()
     def get_action(self, data: dict, domain: str = None):

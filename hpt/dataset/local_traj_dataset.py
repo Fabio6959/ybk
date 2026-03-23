@@ -2,10 +2,8 @@
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
 
-import re
 import numpy as np
 import copy
-import torch
 
 from hpt.utils.replay_buffer import ReplayBuffer
 from hpt.utils.sampler import SequenceSampler, get_val_mask
@@ -195,16 +193,6 @@ class LocalTrajDataset:
         self.action_norm_mode = action_norm_mode
         self.downsample_vision = downsample_vision
         self.dataset_name_withpostfix = self.dataset_name + dataset_encoder_postfix + dataset_postfix
-
-        self.task_name_to_proto_idx = {
-            'basketball': 0, 'bin-picking': 0, 'assembly': 0, 'disassemble': 0,
-            'button-press': 1, 'button-press-topdown': 1, 'button-press-topdown-wall': 1, 'button-press-wall': 1, 'coffee-button': 1,
-            'coffee-pull': 2, 'door-open': 2, 'drawer-open': 2,
-            'door-close': 3, 'drawer-close': 3, 'door-lock': 3, 'door-unlock': 3, 'box-close': 3,
-            'coffee-push': 4, 'reach': 4, 'push': 4,
-            'dial-turn': 5, 'faucet-open': 5, 'faucet-close': 5, 'hand-insert': 5, 'peg-insert-side': 5, 'peg-unplug-side': 5,
-        }
-        self.task_name_regex = re.compile(r'-v\d*.*$')
 
         if use_multiview:
             self.dataset_name_withpostfix = self.dataset_name_withpostfix + "_multiview"
@@ -421,13 +409,15 @@ class LocalTrajDataset:
         """get data item for each trajectory sequence"""
         try:
             sample = self.sampler.sample_sequence(idx)
-            
-            raw_task_name = sample.pop("task_name", None)
-            if raw_task_name is not None:
-                if isinstance(raw_task_name, (list, np.ndarray)):
-                    raw_task_name = raw_task_name[0] if len(raw_task_name) > 0 else None
-            
+            task_name = None
             for key, val in sample.items():
+                if key == "task_name":
+                    # Extract task_name from the first step (all steps in a sequence have the same task)
+                    if isinstance(val, (list, np.ndarray)):
+                        task_name = val[0] if len(val) > 0 else None
+                    else:
+                        task_name = val
+                    continue
                 if key != "action":
                     if self.proprioception_expand and key == "state":
                         sample[key] = np.tile(sample[key][..., None], (1, 1, self.proprioception_expand_dim))                
@@ -435,24 +425,16 @@ class LocalTrajDataset:
                         sample[key] = val[:1]
                     else:
                         sample[key] = val[: self.observation_horizon]
+
                 else:
+                    # future actions
                     sample["action"] = val[
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
             
-            raw_domain = raw_task_name if raw_task_name is not None else self.dataset_name
-            task_base_name = self.task_name_regex.sub('', raw_domain)
-            
-            # 脏数据修复：处理残留的 -v 后缀或特殊情况
-            if task_base_name.endswith('-v'):
-                task_base_name = task_base_name[:-2]
-            
-            if task_base_name not in self.task_name_to_proto_idx:
-                raise ValueError(f"严重警告：发现未知任务 '{task_base_name}'，请把它加到映射表里！")
-            task_id = self.task_name_to_proto_idx[task_base_name]
-            sample["task_id"] = torch.tensor(task_id, dtype=torch.long)
-            
-            return {"task_id": sample["task_id"], "data": sample}
+            # Use task_name as domain for hard-routing, fallback to dataset_name
+            domain = task_name if task_name is not None else self.dataset_name
+            return {"domain": domain, "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")
             raise
