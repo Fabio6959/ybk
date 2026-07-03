@@ -11,6 +11,7 @@ from tqdm import trange
 from hpt.utils import utils
 from hpt import train_test
 from hpt.utils.warmup_lr_wrapper import WarmupLR
+from hpt.dataset.local_traj_dataset import custom_collate_fn
 import wandb
 from omegaconf import OmegaConf
 import numpy as np
@@ -84,13 +85,13 @@ def init_policy(cfg, dataset, domain, device):
 @hydra.main(config_path="../experiments/configs", config_name="config", version_base="1.2")
 def run(cfg):
     """
-    This script runs through the trainining loops for downstream task. It loads the pretrained model
-    and trains it on the downstream task.
+    This script runs through the training loop for a downstream domain. It loads the pretrained model
+    and trains it on the downstream domain.
     """
     # initialize run
     date = cfg.output_dir.replace("\\", "/").split("/")[1]
     run = wandb.init(
-        project="hpt-transfer",
+        project=cfg.wandb_project,
         tags=[cfg.wb_tag],
         name=f"{date}_{cfg.script_name}",
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -112,8 +113,8 @@ def run(cfg):
         cfg.dataset, dataset_name=domain, env_rollout_fn=cfg.dataset_generator_func, **cfg.dataset
     )
     val_dataset = dataset.get_validation_dataset()
-    train_loader = data.DataLoader(dataset, **cfg.dataloader)
-    test_loader = data.DataLoader(val_dataset, **cfg.val_dataloader)
+    train_loader = data.DataLoader(dataset, collate_fn=custom_collate_fn, **cfg.dataloader)
+    test_loader = data.DataLoader(val_dataset, collate_fn=custom_collate_fn, **cfg.val_dataloader)
 
     # init policy
     policy = init_policy(cfg, dataset, domain, device)

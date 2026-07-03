@@ -4,8 +4,6 @@ import torch.nn as nn
 import hydra
 import torch
 
-
-import hydra
 from omegaconf import OmegaConf
 import os
 from PIL import Image
@@ -74,21 +72,6 @@ def save_args_json(path, args, convert_to_vars=False):
         if convert_to_vars:
             args = vars(args)
         json.dump(args, f, indent=4, sort_keys=True)
-
-
-def select_task(task_name_list):
-    """
-    Selects and returns the task configurations for the given task names.
-    """
-    task_configs = []
-    for task_name in task_name_list:
-        # assert task_name in ALL_TASK_CONFIG
-        for task_config in ALL_TASK_CONFIG:
-            if task_config[0] == task_name:
-                task_configs.append(task_config)
-                break
-
-    return task_configs
 
 
 class EinOpsRearrange(nn.Module):
@@ -268,7 +251,7 @@ def download_from_huggingface(huggingface_repo_id: str):
     folder = huggingface_hub.snapshot_download(huggingface_repo_id)
     return folder
 
-def get_image_embeddings(image, encoder, language=None, device="cuda", downsample=False, **kwargs):
+def get_image_embeddings(image, encoder, language=None, device=None, downsample=False, **kwargs):
     """
     Get embeddings for an image using the specified encoder.
 
@@ -276,7 +259,7 @@ def get_image_embeddings(image, encoder, language=None, device="cuda", downsampl
         image: The input image.
         encoder: The type of encoder to use for generating embeddings.
         language: The language used for encoding (optional).
-        device: The device to use for computation (default is "cuda").
+        device: The device to use for computation. Auto-detects if None.
         downsample: Whether to downsample the image (default is False).
         **kwargs: Additional keyword arguments.
 
@@ -286,6 +269,8 @@ def get_image_embeddings(image, encoder, language=None, device="cuda", downsampl
     Raises:
         Exception: If the specified encoder is not supported.
     """
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     if encoder == "resnet":
         return get_resnet_embeddings(image, device=device, downsample=downsample)
     if encoder == "vit":
@@ -311,8 +296,10 @@ def tokenize_language(sentence: str):
     return token_ids[0]
 
 @torch.no_grad()
-def get_dino_embeddings(image, device="cuda", image_token_size=(3, 3)):
+def get_dino_embeddings(image, device=None, image_token_size=(3, 3)):
     """Get DINO embedding."""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_vision_model, global_vision_processor
     if global_vision_model is None:
         global_vision_model = Dinov2Model.from_pretrained("facebook/dinov2-base")
@@ -336,8 +323,10 @@ def get_dino_embeddings(image, device="cuda", image_token_size=(3, 3)):
 
 
 @torch.no_grad()
-def get_clip_embeddings(image, language="", device="cuda", max_length=77, image_token_size=(3, 3), resize=True):
+def get_clip_embeddings(image, language="", device=None, max_length=77, image_token_size=(3, 3), resize=True):
     """Get CLIP embedding."""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_vision_model, global_vision_processor, global_language_model, global_language_processor
     if global_vision_model is None:
         global_vision_model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
@@ -375,8 +364,10 @@ def get_clip_embeddings(image, language="", device="cuda", max_length=77, image_
 
 
 @torch.no_grad()
-def get_t5_embeddings(language, per_token=True, max_length=16, device="cpu"):
+def get_t5_embeddings(language, per_token=True, max_length=16, device=None):
     """Get T5 embedding"""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_t5_model, global_t5_processor
     
     if global_t5_model is None:
@@ -404,8 +395,10 @@ def get_t5_embeddings(language, per_token=True, max_length=16, device="cpu"):
         return emb
 
 @torch.no_grad()
-def get_vit_embeddings(image, per_token=False, device="cuda", downsample=False):
+def get_vit_embeddings(image, per_token=False, device=None, downsample=False):
     """Get VIT embedding. Input: H x W x 3"""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_vision_model
 
     if global_vision_model is None:
@@ -426,9 +419,12 @@ def get_vit_embeddings(image, per_token=False, device="cuda", downsample=False):
 
 
 @torch.no_grad()
-def get_resnet_embeddings(image, per_token=False, device="cuda", downsample=False):
+def get_resnet_embeddings(image, per_token=False, device=None, downsample=False):
     """Get Resnet embedding. Input: H x W x 3"""
     global global_vision_model
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if global_vision_model is None:
         global_vision_model = ResNet().to(device)
@@ -449,9 +445,11 @@ def get_resnet_embeddings(image, per_token=False, device="cuda", downsample=Fals
 
 
 @torch.no_grad()
-def get_r3m_embeddings(image, per_token=False, device="cuda"):
+def get_r3m_embeddings(image, per_token=False, device=None):
     """Get Resnet embedding.
     H x W x 3 -> 1 x D"""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_vision_model
     if global_vision_model is None:
         from r3m import load_r3m
@@ -473,9 +471,11 @@ def get_r3m_embeddings(image, per_token=False, device="cuda"):
 
 
 @torch.no_grad()
-def get_voltron_embeddings(image, per_token=False, device="cuda"):
+def get_voltron_embeddings(image, per_token=False, device=None):
     """Get Resnet embedding.
     H x W x 3 -> 1 x D"""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     global global_vision_model, global_vision_processor
     if global_vision_model is None:
         # install voltron from https://github.com/siddk/voltron-robotics 

@@ -3,7 +3,9 @@
 # --------------------------------------------------------
 
 import numpy as np
+import torch
 import copy
+import shutil
 
 from hpt.utils.replay_buffer import ReplayBuffer
 from hpt.utils.sampler import SequenceSampler, get_val_mask
@@ -80,10 +82,6 @@ def process_dataset_step(
     if state is not None:
         step_dict["state"] = state.astype("float32")
     
-    # Store task_name for hard-routing
-    if "task_name" in step:
-        step_dict["task_name"] = step["task_name"]
-
     if precompute:
         # recompute the embeddings. ~0.5s per data
         if "language_instruction" not in step:
@@ -209,7 +207,7 @@ class LocalTrajDataset:
             if load_from_cache:
                 self.replay_buffer = ReplayBuffer.create_from_path(dataset_path)
             else:
-                os.system(f"rm -rf {dataset_path}")
+                shutil.rmtree(dataset_path, ignore_errors=True)
                 self.replay_buffer = ReplayBuffer.create_empty_zarr(storage=zarr.storage.LocalStore(root=dataset_path))
         else:
             if load_from_cache:
@@ -409,15 +407,16 @@ class LocalTrajDataset:
         """get data item for each trajectory sequence"""
         try:
             sample = self.sampler.sample_sequence(idx)
-            task_name = None
+            # Drop non-numeric metadata before collation; routing no longer uses labels.
+            metadata_keys = []
+            for key, value in sample.items():
+                arr = np.asarray(value)
+                if arr.dtype.kind in {"O", "U", "S"}:
+                    metadata_keys.append(key)
+            for key in metadata_keys:
+                del sample[key]
+            
             for key, val in sample.items():
-                if key == "task_name":
-                    # Extract task_name from the first step (all steps in a sequence have the same task)
-                    if isinstance(val, (list, np.ndarray)):
-                        task_name = val[0] if len(val) > 0 else None
-                    else:
-                        task_name = val
-                    continue
                 if key != "action":
                     if self.proprioception_expand and key == "state":
                         sample[key] = np.tile(sample[key][..., None], (1, 1, self.proprioception_expand_dim))                
@@ -432,12 +431,33 @@ class LocalTrajDataset:
                         self.observation_horizon - 1 : self.action_horizon + self.observation_horizon - 1
                     ]
             
-            # Use task_name as domain for hard-routing, fallback to dataset_name
-            domain = task_name if task_name is not None else self.dataset_name
-            return {"domain": domain, "data": sample}
+            return {"domain": self.dataset_name, "data": sample}
         except Exception as e:
             print(f"Error at index {idx}: {e}")
             raise
+
+
+def custom_collate_fn(batch):
+    """
+    Custom collate function to handle domain strings separately from numeric data.
+    
+    Args:
+        batch: List of dictionaries with 'domain' (string) and 'data' (dict of tensors/arrays)
+    
+    Returns:
+        Dictionary with 'domain' (list of strings) and 'data' (collated dict of tensors)
+    """
+    domains = [item['domain'] for item in batch]
+    data_items = [item['data'] for item in batch]
+    
+    # Use default collate for the numeric data
+    collated_data = torch.utils.data.dataloader.default_collate(data_items)
+    
+    return {
+        'domain': domains,  # Keep as list of strings
+        'data': collated_data
+    }
+
 
 if __name__ == '__main__':
     import torch

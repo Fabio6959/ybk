@@ -1,6 +1,7 @@
 seed: 42
 output_dir: ${hydra:runtime.output_dir}
 domains: mujoco_metaworld # domains to train on
+wandb_project: MoDP # W&B project for training curves
 wb_tag: "default" # wandb tag
 log_interval: 10 # how many steps before logging to wandb
 script_name: "" # log the running script
@@ -20,7 +21,6 @@ comment: ""
 
 defaults:
   - _self_
-  # - tasks: metaworld_task4
 
 # dataset config
 dataset:
@@ -67,6 +67,12 @@ network:
   weight_init_style: 'pytorch' # weight init
   no_trunk: False # ignore trunk
   finetune_encoder: False # whether to finetune encoders
+  num_skill_prototypes: 6 # learned action primitive prototypes for skill routing
+  prototype_momentum: 0.9 # EMA momentum for agent/env/skill prototypes
+  tau_start: 1.0 # initial Gumbel-Softmax temperature
+  tau_end: 0.5 # final Gumbel-Softmax temperature
+  tau_anneal_steps: 20000 # temperature annealing steps
+  lambda_skill_align: 0.05 # KL weight from action-side skill assignments to observation router
 
 # stem network for different modalities
 stem:

@@ -171,7 +171,7 @@ class RolloutRunner:
 
             language_instruction = [lang for (task, _, _, _, lang) in ALL_TASK_CONFIG if task == env][0]
             if env_name is not None:
-                # 处理 env_name 可能是字符串或元组的情况
+                # env_name may be a string or a sequence from the caller.
                 if isinstance(env_name, (list, tuple)):
                     if str(env_name[0]) != str(env):
                         continue
@@ -189,7 +189,7 @@ class RolloutRunner:
             env.seed(seed)
 
             if self.save_video:
-                # 获取视频帧率，如果不存在则使用默认值 30
+                # Use the environment FPS when available, otherwise default to 30.
                 fps = env.metadata.get("video.frames_per_second", 30)
                 writer = writer_for(
                     tag + f"_{video_postfix}",
@@ -358,8 +358,7 @@ def generate_dataset_rollouts(
             for state, action, image in zip(eps_states, eps_actions, eps_images):
                 step = {
                     "action": action,
-                    "observation": {"state": state, "image": image},
-                    "task_name": tag
+                    "observation": {"state": state, "image": image}
                 }
                 steps.append(step)
             data_dict = {"steps": steps}
